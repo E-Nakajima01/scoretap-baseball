@@ -1,0 +1,3151 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+type Half = "top" | "bottom";
+type TeamKey = "away" | "home";
+type BaseKey = "first" | "second" | "third";
+type PositionKey = "P" | "C" | "1B" | "2B" | "3B" | "SS" | "LF" | "CF" | "RF";
+type LineupPosition = PositionKey | "DH";
+type ActionKey =
+  | "single"
+  | "double"
+  | "triple"
+  | "homeRun"
+  | "walk"
+  | "hitByPitch"
+  | "strikeout"
+  | "groundOut"
+  | "flyOut"
+  | "error"
+  | "sacBunt"
+  | "sacFly"
+  | "doublePlay";
+type PitchKey = "ball" | "calledStrike" | "swingingStrike" | "foul";
+type RunnerAction = "advance" | "score" | "out" | "steal" | "caughtStealing" | "wildPitch" | "passedBall";
+type ViewMode = "home" | "setup" | "score" | "teamDetail" | "playerDetail";
+type GameStatus = "draft" | "inProgress" | "completed";
+type EndReason = "regulation" | "called" | "manual";
+type TeamRole = "admin" | "scorer" | "viewer";
+
+type AppUser = {
+  internalUserId: string;
+  loginId: string;
+  displayName: string;
+  passwordHash: string;
+  recoveryCode: string;
+  createdAt: string;
+};
+
+type Runner = {
+  name: string;
+  team: TeamKey;
+  earnedResponsible?: boolean;
+  responsiblePitcher?: string;
+};
+
+type RunEvent = {
+  runnerName: string;
+  team: TeamKey;
+  pitcherName: string;
+  earned: boolean;
+  reason: string;
+};
+
+type TeamProfile = {
+  id: string;
+  name: string;
+  players: string[];
+  inviteCode: string;
+  ownerUserId?: string;
+  memberUserIds: string[];
+  roles: Record<string, TeamRole>;
+};
+
+type Count = {
+  balls: number;
+  strikes: number;
+};
+
+type HistoryEntry = {
+  id: string;
+  type: "play" | "pitch" | "substitution" | "game";
+  inning: number;
+  half: Half;
+  batter: string;
+  descriptionJa: string;
+  code: string;
+  pitcherName?: string;
+  countAfter?: Count;
+  runEvents?: RunEvent[];
+  outsAfter: number;
+  scoreAfter: {
+    away: number;
+    home: number;
+  };
+};
+
+type PlateAppearance = {
+  id: string;
+  gameId: string;
+  gameDate: string;
+  inning: number;
+  half: Half;
+  batter: string;
+  result: HistoryEntry;
+  pitches: HistoryEntry[];
+};
+
+type Defense = Record<PositionKey, string>;
+
+type GameSettings = {
+  scheduledInnings: number;
+  dhEnabled: boolean;
+  mercyEnabled: boolean;
+  mercyRuns: number;
+  mercyAfterInning: number;
+};
+
+type GameState = {
+  id: string;
+  homeTeam: string;
+  awayTeam: string;
+  date: string;
+  status: GameStatus;
+  endReason?: EndReason;
+  startedAt: string;
+  updatedAt: string;
+  endedAt?: string;
+  homeLineup: string[];
+  awayLineup: string[];
+  homeStartingPitcher: string;
+  awayStartingPitcher: string;
+  homeLineupPositions: LineupPosition[];
+  awayLineupPositions: LineupPosition[];
+  settings: GameSettings;
+  defense: Record<TeamKey, Defense>;
+  inning: number;
+  half: Half;
+  outs: number;
+  earnedOuts: number;
+  earnedOutsByPitcher: Record<string, number>;
+  count: Count;
+  score: {
+    away: number;
+    home: number;
+  };
+  bases: Record<BaseKey, Runner | null>;
+  currentBatterIndex: {
+    away: number;
+    home: number;
+  };
+  history: HistoryEntry[];
+};
+
+const STORAGE_KEY = "scoretap-baseball-game";
+const GAME_LIST_KEY = "scoretap-baseball-games";
+const TEAM_LIST_KEY = "scoretap-baseball-teams";
+const USER_LIST_KEY = "scoretap-baseball-users";
+const CURRENT_USER_KEY = "scoretap-baseball-current-user";
+const positions: PositionKey[] = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
+const lineupPositionOptions: LineupPosition[] = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH"];
+const defaultLineupPositions: LineupPosition[] = ["P", "C", "1B", "2B", "3B", "SS", "LF", "CF", "RF"];
+const defaultSettings: GameSettings = {
+  scheduledInnings: 9,
+  dhEnabled: false,
+  mercyEnabled: true,
+  mercyRuns: 10,
+  mercyAfterInning: 5,
+};
+
+const actionLabels: Record<ActionKey, string> = {
+  single: "シングル",
+  double: "二塁打",
+  triple: "三塁打",
+  homeRun: "ホームラン",
+  walk: "四球",
+  hitByPitch: "デッドボール",
+  groundOut: "ゴロアウト",
+  flyOut: "フライアウト",
+  error: "エラー",
+  sacBunt: "犠牲バント",
+  sacFly: "犠牲フライ",
+  doublePlay: "ダブルプレー",
+  strikeout: "三振",
+};
+
+const pitchLabels: Record<PitchKey, { label: string; descriptionJa: string; code: string }> = {
+  ball: { label: "ボール", descriptionJa: "ボール", code: "B" },
+  calledStrike: { label: "見逃し", descriptionJa: "見逃しストライク", code: "S" },
+  swingingStrike: { label: "空振り", descriptionJa: "空振りストライク", code: "Sw" },
+  foul: { label: "ファウル", descriptionJa: "ファウル", code: "F" },
+};
+
+const positionLabels: Record<PositionKey, string> = {
+  P: "ピッチャー",
+  C: "キャッチャー",
+  "1B": "ファースト",
+  "2B": "セカンド",
+  "3B": "サード",
+  SS: "ショート",
+  LF: "レフト",
+  CF: "センター",
+  RF: "ライト",
+};
+
+const lineupPositionLabels: Record<LineupPosition, string> = {
+  ...positionLabels,
+  DH: "DH",
+};
+
+const scoreCodes: Record<PositionKey, string> = {
+  P: "1",
+  C: "2",
+  "1B": "3",
+  "2B": "4",
+  "3B": "5",
+  SS: "6",
+  LF: "7",
+  CF: "8",
+  RF: "9",
+};
+
+const fieldPositions: Array<{ key: PositionKey; className: string }> = [
+  { key: "LF", className: "left-[13%] top-[20%]" },
+  { key: "CF", className: "left-1/2 top-[9%] -translate-x-1/2" },
+  { key: "RF", className: "right-[13%] top-[20%]" },
+  { key: "SS", className: "left-[29%] top-[45%]" },
+  { key: "2B", className: "right-[29%] top-[45%]" },
+  { key: "3B", className: "left-[19%] bottom-[25%]" },
+  { key: "P", className: "left-1/2 top-[57%] -translate-x-1/2" },
+  { key: "1B", className: "right-[19%] bottom-[25%]" },
+  { key: "C", className: "left-1/2 bottom-[4%] -translate-x-1/2" },
+];
+
+const defaultNames = ["1番", "2番", "3番", "4番", "5番", "6番", "7番", "8番", "9番"];
+
+function todayString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function nowString() {
+  return new Date().toISOString();
+}
+
+function defaultDefenderName(position: PositionKey) {
+  return positionLabels[position];
+}
+
+function makeDefense(
+  lineup: string[],
+  lineupPositions: LineupPosition[] = defaultLineupPositions,
+  startingPitcher = "",
+): Defense {
+  return positions.reduce((defense, position) => {
+    const playerIndex = lineupPositions.findIndex((lineupPosition) => lineupPosition === position);
+    return {
+      ...defense,
+      [position]:
+        position === "P" && startingPitcher
+          ? startingPitcher
+          : playerIndex >= 0
+            ? lineup[playerIndex] || defaultDefenderName(position)
+            : defaultDefenderName(position),
+    };
+  }, {} as Defense);
+}
+
+function makeInitialGame(): GameState {
+  const awayLineup = [...defaultNames];
+  const homeLineup = [...defaultNames];
+  const awayLineupPositions = [...defaultLineupPositions];
+  const homeLineupPositions = [...defaultLineupPositions];
+  const timestamp = nowString();
+  return {
+    id: makeId(),
+    homeTeam: "",
+    awayTeam: "",
+    date: todayString(),
+    status: "draft",
+    startedAt: timestamp,
+    updatedAt: timestamp,
+    homeLineup,
+    awayLineup,
+    homeStartingPitcher: "",
+    awayStartingPitcher: "",
+    homeLineupPositions,
+    awayLineupPositions,
+    settings: { ...defaultSettings },
+    defense: {
+      away: makeDefense(awayLineup, awayLineupPositions),
+      home: makeDefense(homeLineup, homeLineupPositions),
+    },
+    inning: 1,
+    half: "top",
+    outs: 0,
+    earnedOuts: 0,
+    earnedOutsByPitcher: {},
+    count: { balls: 0, strikes: 0 },
+    score: { away: 0, home: 0 },
+    bases: { first: null, second: null, third: null },
+    currentBatterIndex: { away: 0, home: 0 },
+    history: [],
+  };
+}
+
+function makeId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function makeShortCode(length = 6) {
+  const source = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({ length })
+    .map(() => source[Math.floor(Math.random() * source.length)])
+    .join("");
+}
+
+function makeLoginId(existingUsers: AppUser[]) {
+  let candidate = "";
+  do {
+    candidate = `tap-${makeShortCode(5).toLowerCase()}`;
+  } while (existingUsers.some((user) => user.loginId === candidate));
+  return candidate;
+}
+
+function makeInviteCode(existingTeams: TeamProfile[]) {
+  let candidate = "";
+  do {
+    candidate = `TAP-${makeShortCode(6)}`;
+  } while (existingTeams.some((team) => team.inviteCode === candidate));
+  return candidate;
+}
+
+function makeRecoveryCode() {
+  return `REC-${makeShortCode(4)}-${makeShortCode(4)}`;
+}
+
+function hashPassword(value: string) {
+  return btoa(unescape(encodeURIComponent(`scoretap:${value}`)));
+}
+
+function normalizeGame(saved: Partial<GameState>): GameState {
+  const base = makeInitialGame();
+  const awayLineup = saved.awayLineup?.length === 9 ? saved.awayLineup : base.awayLineup;
+  const homeLineup = saved.homeLineup?.length === 9 ? saved.homeLineup : base.homeLineup;
+  const awayLineupPositions =
+    saved.awayLineupPositions?.length === 9 ? saved.awayLineupPositions : base.awayLineupPositions;
+  const homeLineupPositions =
+    saved.homeLineupPositions?.length === 9 ? saved.homeLineupPositions : base.homeLineupPositions;
+  const timestamp = nowString();
+
+  return {
+    ...base,
+    ...saved,
+    id: saved.id ?? base.id,
+    status: saved.status ?? (saved.homeTeam && saved.awayTeam ? "inProgress" : "draft"),
+    startedAt: saved.startedAt ?? timestamp,
+    updatedAt: saved.updatedAt ?? timestamp,
+    awayLineup,
+    homeLineup,
+    awayStartingPitcher: saved.awayStartingPitcher ?? base.awayStartingPitcher,
+    homeStartingPitcher: saved.homeStartingPitcher ?? base.homeStartingPitcher,
+    awayLineupPositions,
+    homeLineupPositions,
+    settings: { ...defaultSettings, ...saved.settings },
+    defense: {
+      away: { ...makeDefense(awayLineup, awayLineupPositions, saved.awayStartingPitcher), ...saved.defense?.away },
+      home: { ...makeDefense(homeLineup, homeLineupPositions, saved.homeStartingPitcher), ...saved.defense?.home },
+    },
+    count: saved.count ?? base.count,
+    earnedOuts: saved.earnedOuts ?? base.earnedOuts,
+    earnedOutsByPitcher: saved.earnedOutsByPitcher ?? base.earnedOutsByPitcher,
+    history: saved.history ?? [],
+  };
+}
+
+function readStoredGames(): GameState[] {
+  try {
+    const raw = window.localStorage.getItem(GAME_LIST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Partial<GameState>[];
+    return Array.isArray(parsed) ? parsed.map(normalizeGame) : [];
+  } catch {
+    window.localStorage.removeItem(GAME_LIST_KEY);
+    return [];
+  }
+}
+
+function readStoredTeams(): TeamProfile[] {
+  try {
+    const raw = window.localStorage.getItem(TEAM_LIST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as TeamProfile[];
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((team) => team.name)
+          .map((team) => ({
+            id: team.id || makeId(),
+            name: team.name,
+            players: Array.isArray(team.players) ? team.players.filter(Boolean) : [],
+            inviteCode: team.inviteCode || `TAP-${makeShortCode(6)}`,
+            ownerUserId: team.ownerUserId,
+            memberUserIds: Array.isArray(team.memberUserIds) ? team.memberUserIds : team.ownerUserId ? [team.ownerUserId] : [],
+            roles: team.roles ?? (team.ownerUserId ? { [team.ownerUserId]: "admin" } : {}),
+          }))
+      : [];
+  } catch {
+    window.localStorage.removeItem(TEAM_LIST_KEY);
+    return [];
+  }
+}
+
+function readStoredUsers(): AppUser[] {
+  try {
+    const raw = window.localStorage.getItem(USER_LIST_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as AppUser[];
+    return Array.isArray(parsed)
+      ? parsed
+          .filter((user) => user.internalUserId && user.loginId)
+          .map((user) => ({
+            ...user,
+            displayName: user.displayName || user.loginId,
+            recoveryCode: user.recoveryCode || makeRecoveryCode(),
+            createdAt: user.createdAt || nowString(),
+          }))
+      : [];
+  } catch {
+    window.localStorage.removeItem(USER_LIST_KEY);
+    return [];
+  }
+}
+
+function upsertStoredGame(game: GameState, existing: GameState[]) {
+  const updatedGame = { ...game, updatedAt: nowString() };
+  const rest = existing.filter((item) => item.id !== updatedGame.id);
+  return [updatedGame, ...rest].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function battingTeam(game: GameState): TeamKey {
+  return game.half === "top" ? "away" : "home";
+}
+
+function fieldingTeam(game: GameState): TeamKey {
+  return game.half === "top" ? "home" : "away";
+}
+
+function currentBatter(game: GameState) {
+  const team = battingTeam(game);
+  const lineup = team === "away" ? game.awayLineup : game.homeLineup;
+  return lineup[game.currentBatterIndex[team] % lineup.length] || `${game.currentBatterIndex[team] + 1}番`;
+}
+
+function teamName(game: GameState, team: TeamKey) {
+  return team === "away" ? game.awayTeam : game.homeTeam;
+}
+
+function addRuns(game: GameState, runs: number) {
+  const team = battingTeam(game);
+  return {
+    ...game.score,
+    [team]: game.score[team] + runs,
+  };
+}
+
+function makeRunEvent(game: GameState, runner: Runner, reason: string, forceUnearned = false): RunEvent {
+  const pitcherName = runner.responsiblePitcher || game.defense[fieldingTeam(game)].P;
+  const responsibleEarnedOuts = game.earnedOutsByPitcher[pitcherName] ?? game.earnedOuts;
+  const earned = !forceUnearned && runner.earnedResponsible !== false && responsibleEarnedOuts < 3;
+  return {
+    runnerName: runner.name,
+    team: runner.team,
+    pitcherName,
+    earned,
+    reason: earned ? reason : `${reason} / 非自責`,
+  };
+}
+
+function activeResponsiblePitchers(game: GameState) {
+  return Array.from(
+    new Set([
+      game.defense[fieldingTeam(game)].P,
+      ...Object.values(game.bases)
+        .map((runner) => runner?.responsiblePitcher)
+        .filter((name): name is string => Boolean(name)),
+    ]),
+  );
+}
+
+function addEarnedOutsByPitcher(game: GameState, outsAdded: number) {
+  if (outsAdded <= 0) return game.earnedOutsByPitcher;
+  const next = { ...game.earnedOutsByPitcher };
+  activeResponsiblePitchers(game).forEach((pitcherName) => {
+    next[pitcherName] = (next[pitcherName] ?? game.earnedOuts) + outsAdded;
+  });
+  return next;
+}
+
+function advanceBatter(game: GameState) {
+  const team = battingTeam(game);
+  return {
+    ...game.currentBatterIndex,
+    [team]: (game.currentBatterIndex[team] + 1) % 9,
+  };
+}
+
+function shouldFinishAtHalfEnd(game: GameState) {
+  if (game.inning < game.settings.scheduledInnings) return false;
+  if (game.half === "top") return game.score.home > game.score.away;
+  return game.score.away !== game.score.home;
+}
+
+function shouldMercyEnd(game: GameState) {
+  if (!game.settings.mercyEnabled) return false;
+  if (game.inning < game.settings.mercyAfterInning) return false;
+  return Math.abs(game.score.away - game.score.home) >= game.settings.mercyRuns;
+}
+
+function clearHalfInning(
+  game: GameState,
+  outs: number,
+  earnedOuts: number,
+): Pick<GameState, "inning" | "half" | "outs" | "earnedOuts" | "bases" | "count" | "status"> &
+  Pick<Partial<GameState>, "earnedOutsByPitcher" | "endReason" | "endedAt"> {
+  if (outs < 3) {
+    return {
+      inning: game.inning,
+      half: game.half,
+      outs,
+      earnedOuts,
+      earnedOutsByPitcher: game.earnedOutsByPitcher,
+      bases: game.bases,
+      count: { balls: 0, strikes: 0 },
+      status: game.status,
+    };
+  }
+
+  if (shouldFinishAtHalfEnd(game)) {
+    return {
+      inning: game.inning,
+      half: game.half,
+      outs: 3,
+      earnedOuts: 0,
+      earnedOutsByPitcher: {},
+      bases: { first: null, second: null, third: null },
+      count: { balls: 0, strikes: 0 },
+      status: "completed",
+      endReason: "regulation",
+      endedAt: nowString(),
+    };
+  }
+
+  if (shouldMercyEnd(game)) {
+    return {
+      inning: game.inning,
+      half: game.half,
+      outs: 3,
+      earnedOuts: 0,
+      earnedOutsByPitcher: {},
+      bases: { first: null, second: null, third: null },
+      count: { balls: 0, strikes: 0 },
+      status: "completed",
+      endReason: "called",
+      endedAt: nowString(),
+    };
+  }
+
+  return {
+    inning: game.half === "bottom" ? game.inning + 1 : game.inning,
+    half: game.half === "top" ? "bottom" : "top",
+    outs: 0,
+    earnedOuts: 0,
+    earnedOutsByPitcher: {},
+    bases: { first: null, second: null, third: null },
+    count: { balls: 0, strikes: 0 },
+    status: game.status,
+  };
+}
+
+function advanceRunners(game: GameState, batter: Runner, basesGained: 1 | 2 | 3 | 4, forceUnearned = false) {
+  const runEvents: RunEvent[] = basesGained === 4 ? [makeRunEvent(game, batter, "打者走者の得点", forceUnearned)] : [];
+  const nextBases: Record<BaseKey, Runner | null> = {
+    first: null,
+    second: null,
+    third: null,
+  };
+
+  const occupied: Array<[number, Runner | null]> = [
+    [3, game.bases.third],
+    [2, game.bases.second],
+    [1, game.bases.first],
+  ];
+
+  occupied.forEach(([baseNumber, runner]) => {
+    if (!runner) return;
+
+    let destination = baseNumber + basesGained;
+    if (basesGained === 1 && baseNumber >= 2) destination = 4;
+    if (basesGained === 2) destination = 4;
+
+    if (destination >= 4) {
+      runEvents.push(makeRunEvent(game, runner, `${baseLabel(baseKeyFromNumber(baseNumber))}走者の得点`, forceUnearned));
+      return;
+    }
+    if (destination === 3) nextBases.third = forceUnearned ? { ...runner, earnedResponsible: false } : runner;
+    if (destination === 2) nextBases.second = forceUnearned ? { ...runner, earnedResponsible: false } : runner;
+  });
+
+  if (basesGained === 1) nextBases.first = forceUnearned ? { ...batter, earnedResponsible: false } : batter;
+  if (basesGained === 2) nextBases.second = forceUnearned ? { ...batter, earnedResponsible: false } : batter;
+  if (basesGained === 3) nextBases.third = forceUnearned ? { ...batter, earnedResponsible: false } : batter;
+
+  return { nextBases, runEvents };
+}
+
+function walkRunners(game: GameState, batter: Runner) {
+  const runEvents: RunEvent[] = [];
+  const nextBases = { ...game.bases };
+
+  if (nextBases.first && nextBases.second && nextBases.third) {
+    runEvents.push(makeRunEvent(game, nextBases.third, "押し出しの得点"));
+  }
+  if (nextBases.first && nextBases.second) nextBases.third = nextBases.second;
+  if (nextBases.first) nextBases.second = nextBases.first;
+  nextBases.first = batter;
+
+  return { nextBases, runEvents };
+}
+
+function playText(action: ActionKey, position: PositionKey | null) {
+  const posJa = position ? positionLabels[position] : "";
+  const code = position ? scoreCodes[position] : "";
+
+  if (action === "single") return { descriptionJa: `${posJa ? `${posJa}へ` : ""}シングルヒット`, code: "1B" };
+  if (action === "double") return { descriptionJa: `${posJa ? `${posJa}へ` : ""}二塁打`, code: "2B" };
+  if (action === "triple") return { descriptionJa: `${posJa ? `${posJa}へ` : ""}三塁打`, code: "3B" };
+  if (action === "homeRun") return { descriptionJa: "ホームラン", code: "HR" };
+  if (action === "walk") return { descriptionJa: "四球で出塁", code: "BB" };
+  if (action === "hitByPitch") return { descriptionJa: "デッドボールで出塁", code: "HBP" };
+  if (action === "strikeout") return { descriptionJa: "三振でアウト", code: "K" };
+  if (action === "groundOut") return { descriptionJa: `${posJa || "内野"}ゴロでアウト`, code: code ? `${code}-3` : "GO" };
+  if (action === "flyOut") return { descriptionJa: `${posJa || "野手"}フライでアウト`, code: code ? `F${code}` : "FO" };
+  if (action === "error") return { descriptionJa: `${posJa || "守備"}のエラーで出塁`, code: code ? `E${code}` : "E" };
+  if (action === "sacBunt") return { descriptionJa: `${posJa || "内野"}への犠牲バント`, code: code ? `SAC ${code}-3` : "SAC" };
+  if (action === "sacFly") return { descriptionJa: `${posJa || "外野"}への犠牲フライ`, code: code ? `SF${code}` : "SF" };
+  return { descriptionJa: `${posJa || "内野"}ゴロのダブルプレー`, code: code ? `${code}-4-3 DP` : "DP" };
+}
+
+function makeHistoryEntry(
+  game: GameState,
+  entry: Pick<HistoryEntry, "type" | "descriptionJa" | "code"> & Partial<HistoryEntry>,
+): HistoryEntry {
+  return {
+    id: makeId(),
+    type: entry.type,
+    inning: game.inning,
+    half: game.half,
+    batter: entry.batter ?? currentBatter(game),
+    descriptionJa: entry.descriptionJa,
+    code: entry.code,
+    pitcherName: entry.pitcherName ?? (entry.type === "pitch" || entry.type === "play" ? game.defense[fieldingTeam(game)].P : undefined),
+    countAfter: entry.countAfter,
+    runEvents: entry.runEvents,
+    outsAfter: entry.outsAfter ?? game.outs,
+    scoreAfter: entry.scoreAfter ?? game.score,
+  };
+}
+
+function endReasonLabel(reason?: EndReason) {
+  if (reason === "called") return "コールド・途中終了";
+  if (reason === "manual") return "手動終了";
+  return "正式終了";
+}
+
+function winnerLabel(game: GameState) {
+  if (game.score.away === game.score.home) return "引き分け";
+  return game.score.away > game.score.home ? `${game.awayTeam} 勝利` : `${game.homeTeam} 勝利`;
+}
+
+function finishGame(game: GameState, reason: EndReason): GameState {
+  if (game.status === "completed") return game;
+
+  const endedAt = nowString();
+  const descriptionJa = `試合終了: ${winnerLabel(game)} (${endReasonLabel(reason)})`;
+  const entry = makeHistoryEntry(game, {
+    type: "game",
+    descriptionJa,
+    code: reason === "called" ? "CALLED" : "FINAL",
+    outsAfter: game.outs,
+    scoreAfter: game.score,
+  });
+
+  return {
+    ...game,
+    status: "completed",
+    endReason: reason,
+    endedAt,
+    updatedAt: endedAt,
+    count: { balls: 0, strikes: 0 },
+    history: [entry, ...game.history],
+  };
+}
+
+function finishGameIfNeeded(game: GameState): GameState {
+  if (game.status === "completed") {
+    const hasFinalEntry = game.history.some((entry) => entry.type === "game" && entry.code === "FINAL");
+    if (hasFinalEntry) return game;
+    return finishGame({ ...game, status: "inProgress" }, game.endReason ?? "regulation");
+  }
+
+  if (game.inning >= game.settings.scheduledInnings && game.half === "bottom" && game.score.home > game.score.away) {
+    return finishGame(game, "regulation");
+  }
+
+  return game;
+}
+
+function applyPlay(game: GameState, action: ActionKey, position: PositionKey | null): GameState {
+  if (game.status === "completed") return game;
+  const team = battingTeam(game);
+  const batterName = currentBatter(game);
+  const batter: Runner = { name: batterName, team, responsiblePitcher: game.defense[fieldingTeam(game)].P };
+  const text = playText(action, position);
+  let nextBases = game.bases;
+  let nextScore = game.score;
+  let nextOuts = game.outs;
+  let nextEarnedOuts = game.earnedOuts;
+  let nextEarnedOutsByPitcher = game.earnedOutsByPitcher;
+  let runEvents: RunEvent[] = [];
+
+  if (action === "single" || action === "double" || action === "triple" || action === "homeRun") {
+    const basesGained = action === "single" ? 1 : action === "double" ? 2 : action === "triple" ? 3 : 4;
+    const advanced = advanceRunners(game, batter, basesGained);
+    nextBases = advanced.nextBases;
+    runEvents = advanced.runEvents;
+    nextScore = addRuns(game, runEvents.length);
+  }
+
+  if (action === "walk" || action === "hitByPitch") {
+    const walked = walkRunners(game, batter);
+    nextBases = walked.nextBases;
+    runEvents = walked.runEvents;
+    nextScore = addRuns(game, runEvents.length);
+  }
+
+  if (action === "error") {
+    const errorBatter: Runner = { ...batter, earnedResponsible: false };
+    const advanced = advanceRunners(game, errorBatter, 1, true);
+    nextBases = advanced.nextBases;
+    runEvents = advanced.runEvents;
+    nextScore = addRuns(game, runEvents.length);
+    nextEarnedOuts += 1;
+    nextEarnedOutsByPitcher = addEarnedOutsByPitcher(game, 1);
+  }
+
+  if (action === "strikeout" || action === "groundOut" || action === "flyOut") {
+    nextOuts += 1;
+    nextEarnedOuts += 1;
+    nextEarnedOutsByPitcher = addEarnedOutsByPitcher(game, 1);
+  }
+
+  if (action === "sacBunt") {
+    nextOuts += 1;
+    nextEarnedOuts += 1;
+    nextEarnedOutsByPitcher = addEarnedOutsByPitcher(game, 1);
+    runEvents = game.bases.third ? [makeRunEvent(game, game.bases.third, "犠牲バントで得点")] : [];
+    nextBases = {
+      first: null,
+      second: game.bases.first,
+      third: game.bases.second,
+    };
+    nextScore = addRuns(game, runEvents.length);
+  }
+
+  if (action === "sacFly") {
+    nextOuts += 1;
+    nextEarnedOuts += 1;
+    nextEarnedOutsByPitcher = addEarnedOutsByPitcher(game, 1);
+    if (game.bases.third) {
+      nextBases = { ...game.bases, third: null };
+      runEvents = [makeRunEvent(game, game.bases.third, "犠牲フライで得点")];
+      nextScore = addRuns(game, runEvents.length);
+    }
+  }
+
+  if (action === "doublePlay") {
+    const outsAdded = Math.min(2, 3 - game.outs);
+    nextOuts += outsAdded;
+    nextEarnedOuts += outsAdded;
+    nextEarnedOutsByPitcher = addEarnedOutsByPitcher(game, outsAdded);
+    nextBases = { ...game.bases, first: null };
+  }
+
+  const inningState = clearHalfInning(
+    { ...game, bases: nextBases, score: nextScore, earnedOutsByPitcher: nextEarnedOutsByPitcher },
+    nextOuts,
+    nextEarnedOuts,
+  );
+  const play = makeHistoryEntry(game, {
+    type: "play",
+    descriptionJa: text.descriptionJa,
+    code: text.code,
+    runEvents,
+    outsAfter: inningState.outs,
+    scoreAfter: nextScore,
+  });
+
+  return finishGameIfNeeded({
+    ...game,
+    ...inningState,
+    score: nextScore,
+    currentBatterIndex: advanceBatter(game),
+    history: [play, ...game.history],
+  });
+}
+
+function applyPitch(game: GameState, pitch: PitchKey): GameState {
+  if (game.status === "completed") return game;
+  const pitchInfo = pitchLabels[pitch];
+  const nextCount: Count = { ...game.count };
+
+  if (pitch === "ball") nextCount.balls += 1;
+  if (pitch === "calledStrike" || pitch === "swingingStrike") nextCount.strikes += 1;
+  if (pitch === "foul" && nextCount.strikes < 2) nextCount.strikes += 1;
+
+  const pitchEntry = makeHistoryEntry(game, {
+    type: "pitch",
+    descriptionJa: pitchInfo.descriptionJa,
+    code: pitchInfo.code,
+    countAfter: nextCount,
+  });
+
+  const withPitch = {
+    ...game,
+    count: nextCount,
+    history: [pitchEntry, ...game.history],
+  };
+
+  if (nextCount.balls >= 4) {
+    return applyPlay(withPitch, "walk", null);
+  }
+
+  if (nextCount.strikes >= 3) {
+    return applyPlay(withPitch, "strikeout", null);
+  }
+
+  return withPitch;
+}
+
+function halfLabel(half: Half) {
+  return half === "top" ? "表" : "裏";
+}
+
+function countLabel(count: Count) {
+  return `${count.balls}-${count.strikes}`;
+}
+
+function baseLabel(base: BaseKey) {
+  if (base === "first") return "一塁";
+  if (base === "second") return "二塁";
+  return "三塁";
+}
+
+function nextBase(base: BaseKey): BaseKey | "home" {
+  if (base === "first") return "second";
+  if (base === "second") return "third";
+  return "home";
+}
+
+function baseKeyFromNumber(baseNumber: number): BaseKey {
+  if (baseNumber === 1) return "first";
+  if (baseNumber === 2) return "second";
+  return "third";
+}
+
+function isPlateResult(entry: HistoryEntry) {
+  const code = entry.code.split(" ")[0];
+  return ["1B", "2B", "3B", "HR", "BB", "HBP", "K", "GO", "FO", "E", "SAC", "SF", "DP"].includes(code);
+}
+
+function plateAppearancesForGame(game: GameState) {
+  const pendingPitches = new Map<string, HistoryEntry[]>();
+  const appearances: PlateAppearance[] = [];
+
+  [...game.history].reverse().forEach((entry) => {
+    if (entry.type === "pitch") {
+      const current = pendingPitches.get(entry.batter) ?? [];
+      pendingPitches.set(entry.batter, [...current, entry]);
+      return;
+    }
+
+    if (entry.type === "play" && isPlateResult(entry)) {
+      const pitches = pendingPitches.get(entry.batter) ?? [];
+      appearances.push({
+        id: `${game.id}-${entry.id}`,
+        gameId: game.id,
+        gameDate: game.date,
+        inning: entry.inning,
+        half: entry.half,
+        batter: entry.batter,
+        result: entry,
+        pitches,
+      });
+      pendingPitches.set(entry.batter, []);
+    }
+  });
+
+  return appearances;
+}
+
+function playerPlateAppearances(games: GameState[], teamNameValue: string, playerName: string) {
+  return teamGames(games, teamNameValue)
+    .flatMap((item) => plateAppearancesForGame(item))
+    .filter((appearance) => appearance.batter === playerName);
+}
+
+function pitchSummary(appearance: PlateAppearance) {
+  return appearance.pitches.reduce(
+    (summary, pitch) => ({
+      total: summary.total + 1,
+      balls: summary.balls + (pitch.code === "B" ? 1 : 0),
+      calledStrikes: summary.calledStrikes + (pitch.code === "S" ? 1 : 0),
+      swingingStrikes: summary.swingingStrikes + (pitch.code === "Sw" ? 1 : 0),
+      fouls: summary.fouls + (pitch.code === "F" ? 1 : 0),
+    }),
+    { total: 0, balls: 0, calledStrikes: 0, swingingStrikes: 0, fouls: 0 },
+  );
+}
+
+function outsFromPlateAppearance(appearance: PlateAppearance) {
+  const code = appearance.result.code.split(" ")[0];
+  if (appearance.result.code.includes("DP")) return 2;
+  if (["K", "GO", "FO", "SAC", "SF"].includes(code)) return 1;
+  return 0;
+}
+
+function teamGames(games: GameState[], teamNameValue: string) {
+  return games.filter((item) => item.awayTeam === teamNameValue || item.homeTeam === teamNameValue);
+}
+
+function teamRecord(games: GameState[], teamNameValue: string) {
+  return teamGames(games, teamNameValue).reduce(
+    (record, item) => {
+      if (item.status !== "completed") return record;
+      const isAway = item.awayTeam === teamNameValue;
+      const ownScore = isAway ? item.score.away : item.score.home;
+      const opponentScore = isAway ? item.score.home : item.score.away;
+      if (ownScore > opponentScore) return { ...record, wins: record.wins + 1 };
+      if (ownScore < opponentScore) return { ...record, losses: record.losses + 1 };
+      return { ...record, draws: record.draws + 1 };
+    },
+    { wins: 0, losses: 0, draws: 0 },
+  );
+}
+
+function playerStats(games: GameState[], teamNameValue: string, playerName: string) {
+  const relevantGames = teamGames(games, teamNameValue);
+  const resultCodes = new Set(["1B", "2B", "3B", "HR", "BB", "HBP", "K", "GO", "FO", "E", "SAC", "SF", "DP"]);
+
+  return relevantGames.reduce(
+    (stats, item) => {
+      const played =
+        item.awayLineup.includes(playerName) ||
+        item.homeLineup.includes(playerName) ||
+        Object.values(item.defense.away).includes(playerName) ||
+        Object.values(item.defense.home).includes(playerName) ||
+        item.history.some((entry) => entry.batter === playerName || entry.descriptionJa.includes(playerName));
+
+      if (!played) return stats;
+
+      const nextStats = { ...stats, games: stats.games + 1 };
+      item.history.forEach((entry) => {
+        if (entry.batter === playerName && entry.type === "pitch") {
+          nextStats.pitchesSeen += 1;
+          if (entry.code === "B") nextStats.takenBalls += 1;
+          if (entry.code === "S") nextStats.calledStrikes += 1;
+          if (entry.code === "Sw") nextStats.swingingStrikes += 1;
+          if (entry.code === "F") nextStats.fouls += 1;
+        }
+        if (entry.batter === playerName && resultCodes.has(entry.code.split(" ")[0])) {
+          nextStats.pa += 1;
+          if (entry.code === "1B") nextStats.singles += 1;
+          if (entry.code === "2B") nextStats.doubles += 1;
+          if (entry.code === "3B") nextStats.triples += 1;
+          if (entry.code === "HR") {
+            nextStats.homeRuns += 1;
+            nextStats.runs += 1;
+          }
+          if (entry.code === "BB") nextStats.walks += 1;
+          if (entry.code === "HBP") nextStats.hitByPitch += 1;
+          if (entry.code === "K") nextStats.strikeouts += 1;
+          if (entry.code === "SAC" || entry.code.startsWith("SAC")) nextStats.sacrificeBunts += 1;
+          if (entry.code.startsWith("SF")) nextStats.sacrificeFlies += 1;
+          if (entry.code.startsWith("E")) nextStats.reachedOnError += 1;
+        }
+        if (entry.descriptionJa.includes(`${playerName}がホームイン`)) nextStats.runs += 1;
+        if (entry.descriptionJa.includes(`${playerName}が`) && entry.code.startsWith("SB")) nextStats.stolenBases += 1;
+        if (entry.descriptionJa.includes(`${playerName}が`) && entry.code === "CS") nextStats.caughtStealing += 1;
+      });
+      return nextStats;
+    },
+    {
+      games: 0,
+      pa: 0,
+      singles: 0,
+      doubles: 0,
+      triples: 0,
+      homeRuns: 0,
+      walks: 0,
+      hitByPitch: 0,
+      strikeouts: 0,
+      sacrificeBunts: 0,
+      sacrificeFlies: 0,
+      reachedOnError: 0,
+      runs: 0,
+      stolenBases: 0,
+      caughtStealing: 0,
+      pitchesSeen: 0,
+      takenBalls: 0,
+      calledStrikes: 0,
+      swingingStrikes: 0,
+      fouls: 0,
+    },
+  );
+}
+
+function pitcherStats(games: GameState[], teamNameValue: string, playerName: string) {
+  return teamGames(games, teamNameValue).reduce(
+    (stats, item) => {
+      const isAwayTeam = item.awayTeam === teamNameValue;
+      const initialPitcher = isAwayTeam ? item.awayStartingPitcher || item.defense.away.P : item.homeStartingPitcher || item.defense.home.P;
+      const appearedAsPitcher =
+        initialPitcher === playerName ||
+        item.history.some((entry) => entry.pitcherName === playerName || (entry.code === "SUB 1" && entry.descriptionJa.includes(playerName)));
+      if (!appearedAsPitcher) return stats;
+
+      const opponentTeam: TeamKey = isAwayTeam ? "home" : "away";
+      const opponentLineup = opponentTeam === "away" ? item.awayLineup : item.homeLineup;
+      const opponentNames = new Set(opponentLineup);
+      const appearances = plateAppearancesForGame(item).filter(
+        (appearance) => opponentNames.has(appearance.batter) && (appearance.result.pitcherName ?? initialPitcher) === playerName,
+      );
+
+      const nextStats = { ...stats, games: stats.games + 1 };
+      const legacyRunsAllowed = isAwayTeam ? item.score.home : item.score.away;
+      const gameRunEvents = item.history
+        .flatMap((entry) => entry.runEvents ?? [])
+        .filter((run) => run.team === opponentTeam && run.pitcherName === playerName);
+      appearances.forEach((appearance) => {
+        const code = appearance.result.code.split(" ")[0];
+        nextStats.battersFaced += 1;
+        nextStats.pitches += appearance.pitches.filter((pitch) => (pitch.pitcherName ?? initialPitcher) === playerName).length;
+        nextStats.outs += outsFromPlateAppearance(appearance);
+        if (["1B", "2B", "3B", "HR"].includes(code)) nextStats.hitsAllowed += 1;
+        if (code === "HR") nextStats.homeRunsAllowed += 1;
+        if (code === "BB") nextStats.walks += 1;
+        if (code === "HBP") nextStats.hitByPitch += 1;
+        if (code === "K") nextStats.strikeouts += 1;
+      });
+      if (item.history.some((entry) => entry.runEvents?.length)) {
+        nextStats.runsAllowed += gameRunEvents.length;
+        nextStats.earnedRuns += gameRunEvents.filter((run) => run.earned).length;
+      } else if (initialPitcher === playerName) {
+        nextStats.runsAllowed += legacyRunsAllowed;
+        nextStats.earnedRuns += legacyRunsAllowed;
+      }
+
+      return nextStats;
+    },
+    {
+      games: 0,
+      battersFaced: 0,
+      outs: 0,
+      pitches: 0,
+      hitsAllowed: 0,
+      homeRunsAllowed: 0,
+      walks: 0,
+      hitByPitch: 0,
+      strikeouts: 0,
+      runsAllowed: 0,
+      earnedRuns: 0,
+    },
+  );
+}
+
+function formatAverage(value: number) {
+  if (!Number.isFinite(value)) return ".000";
+  return value.toFixed(3).replace(/^0/, "");
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return "0.0%";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatInnings(outs: number) {
+  const fullInnings = Math.floor(outs / 3);
+  const partialOuts = outs % 3;
+  return partialOuts ? `${fullInnings}.${partialOuts}` : `${fullInnings}`;
+}
+
+function formatDecimal(value: number, digits = 2) {
+  if (!Number.isFinite(value)) return "0.00";
+  return value.toFixed(digits);
+}
+
+function CountDots({ label, active, total, color }: { label: string; active: number; total: number; color: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="w-5 text-sm font-black text-slate-500">{label}</span>
+      <div className="flex gap-1">
+        {Array.from({ length: total }).map((_, index) => (
+          <span
+            className={`h-4 w-4 rounded-full border border-slate-300 ${index < active ? color : "bg-slate-100"}`}
+            key={`${label}-${index}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export default function Home() {
+  const [game, setGame] = useState<GameState>(() => makeInitialGame());
+  const [games, setGames] = useState<GameState[]>([]);
+  const [teams, setTeams] = useState<TeamProfile[]>([]);
+  const [users, setUsers] = useState<AppUser[]>([]);
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [ready, setReady] = useState(false);
+  const [selectedPosition, setSelectedPosition] = useState<PositionKey | null>("SS");
+  const [selectedBase, setSelectedBase] = useState<BaseKey | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("home");
+  const [subName, setSubName] = useState("");
+  const [battingSubName, setBattingSubName] = useState("");
+  const [teamNameInput, setTeamNameInput] = useState("");
+  const [teamPlayersInput, setTeamPlayersInput] = useState<string[]>([]);
+  const [memberNameInput, setMemberNameInput] = useState("");
+  const [editingTeamId, setEditingTeamId] = useState("");
+  const [openTeamMenuId, setOpenTeamMenuId] = useState("");
+  const [openGameMenuId, setOpenGameMenuId] = useState("");
+  const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedPlayerName, setSelectedPlayerName] = useState("");
+  const [selectedPlateAppearanceId, setSelectedPlateAppearanceId] = useState("");
+  const [loginIdInput, setLoginIdInput] = useState("");
+  const [loginPasswordInput, setLoginPasswordInput] = useState("");
+  const [newLoginIdInput, setNewLoginIdInput] = useState("");
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [displayNameInput, setDisplayNameInput] = useState("");
+  const [inviteCodeInput, setInviteCodeInput] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [issuedAccount, setIssuedAccount] = useState<{ loginId: string; password: string; recoveryCode: string } | null>(null);
+
+  useEffect(() => {
+    const storedGames = readStoredGames();
+    const storedUsers = readStoredUsers();
+    const storedCurrentUserId = window.localStorage.getItem(CURRENT_USER_KEY) || "";
+    setGames(storedGames);
+    setUsers(storedUsers);
+    setCurrentUserId(storedUsers.some((user) => user.internalUserId === storedCurrentUserId) ? storedCurrentUserId : "");
+    setTeams(readStoredTeams());
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = normalizeGame(JSON.parse(saved) as Partial<GameState>);
+        setGame(parsed);
+        setViewMode("home");
+      } catch {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
+    }
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(game));
+    if (game.homeTeam || game.awayTeam || game.history.length > 0) {
+      setGames((current) => {
+        const nextGames = upsertStoredGame(game, current);
+        window.localStorage.setItem(GAME_LIST_KEY, JSON.stringify(nextGames));
+        return nextGames;
+      });
+    }
+  }, [game, ready]);
+
+  const currentTeam = battingTeam(game);
+  const defenseTeam = fieldingTeam(game);
+  const batter = currentBatter(game);
+  const currentUser = users.find((user) => user.internalUserId === currentUserId) ?? null;
+  const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? null;
+  const selectedRunner = selectedBase ? game.bases[selectedBase] : null;
+  const selectedDefender = selectedPosition ? game.defense[defenseTeam][selectedPosition] : "";
+  const requiresPosition = useMemo(
+    () => new Set<ActionKey>(["groundOut", "flyOut", "error", "sacBunt", "sacFly", "doublePlay"]),
+    [],
+  );
+
+  function persistUsers(nextUsers: AppUser[]) {
+    setUsers(nextUsers);
+    window.localStorage.setItem(USER_LIST_KEY, JSON.stringify(nextUsers));
+  }
+
+  function issueAccount() {
+    const password = makeShortCode(8).toLowerCase();
+    const nextUser: AppUser = {
+      internalUserId: makeId(),
+      loginId: makeLoginId(users),
+      displayName: "ScoreTapユーザー",
+      passwordHash: hashPassword(password),
+      recoveryCode: makeRecoveryCode(),
+      createdAt: nowString(),
+    };
+    const nextUsers = [nextUser, ...users];
+    persistUsers(nextUsers);
+    setCurrentUserId(nextUser.internalUserId);
+    window.localStorage.setItem(CURRENT_USER_KEY, nextUser.internalUserId);
+    setIssuedAccount({ loginId: nextUser.loginId, password, recoveryCode: nextUser.recoveryCode });
+    setAuthMessage("");
+  }
+
+  function loginAccount() {
+    const loginId = loginIdInput.trim();
+    const password = loginPasswordInput.trim();
+    const user = users.find((item) => item.loginId === loginId && item.passwordHash === hashPassword(password));
+    if (!user) {
+      setAuthMessage("IDまたはパスワードが違います。");
+      return;
+    }
+    setCurrentUserId(user.internalUserId);
+    window.localStorage.setItem(CURRENT_USER_KEY, user.internalUserId);
+    setLoginIdInput("");
+    setLoginPasswordInput("");
+    setAuthMessage(`${user.displayName}でログインしました。`);
+  }
+
+  function logoutAccount() {
+    setCurrentUserId("");
+    window.localStorage.removeItem(CURRENT_USER_KEY);
+    setIssuedAccount(null);
+    setAuthMessage("ログアウトしました。");
+  }
+
+  function changeLoginId() {
+    if (!currentUser) return;
+    const nextLoginId = newLoginIdInput.trim();
+    if (nextLoginId.length < 4) {
+      setAuthMessage("IDは4文字以上で設定してください。");
+      return;
+    }
+    if (users.some((user) => user.loginId === nextLoginId && user.internalUserId !== currentUser.internalUserId)) {
+      setAuthMessage("そのIDはすでに使われています。");
+      return;
+    }
+    const nextUsers = users.map((user) =>
+      user.internalUserId === currentUser.internalUserId ? { ...user, loginId: nextLoginId } : user,
+    );
+    persistUsers(nextUsers);
+    setNewLoginIdInput("");
+    setAuthMessage(`ログインIDを${nextLoginId}に変更しました。`);
+  }
+
+  function updateAccountSettings() {
+    if (!currentUser) return;
+    const nextDisplayName = displayNameInput.trim() || currentUser.displayName;
+    const nextPassword = newPasswordInput.trim();
+    if (nextPassword && nextPassword.length < 4) {
+      setAuthMessage("新しいパスワードは4文字以上で設定してください。");
+      return;
+    }
+
+    const nextUsers = users.map((user) =>
+      user.internalUserId === currentUser.internalUserId
+        ? {
+            ...user,
+            displayName: nextDisplayName,
+            passwordHash: nextPassword ? hashPassword(nextPassword) : user.passwordHash,
+          }
+        : user,
+    );
+    persistUsers(nextUsers);
+    setDisplayNameInput("");
+    setNewPasswordInput("");
+    setAuthMessage("アカウント設定を更新しました。");
+  }
+
+  function joinTeamByInviteCode() {
+    if (!currentUser) {
+      setAuthMessage("チームに参加するには先にログインしてください。");
+      return;
+    }
+    const code = inviteCodeInput.trim().toUpperCase();
+    const target = teams.find((team) => team.inviteCode === code);
+    if (!target) {
+      setAuthMessage("招待コードが見つかりません。");
+      return;
+    }
+    const nextTeams = teams.map((team) =>
+      team.id === target.id
+        ? {
+            ...team,
+            memberUserIds: Array.from(new Set([...team.memberUserIds, currentUser.internalUserId])),
+            roles: { ...team.roles, [currentUser.internalUserId]: team.roles[currentUser.internalUserId] ?? "viewer" },
+          }
+        : team,
+    );
+    setTeams(nextTeams);
+    window.localStorage.setItem(TEAM_LIST_KEY, JSON.stringify(nextTeams));
+    setInviteCodeInput("");
+    setAuthMessage(`${target.name}に参加しました。最初の権限は閲覧者です。`);
+  }
+
+  function updateLineup(team: TeamKey, index: number, value: string) {
+    setGame((current) => {
+      const key = team === "home" ? "homeLineup" : "awayLineup";
+      const positionKey = team === "home" ? "homeLineupPositions" : "awayLineupPositions";
+      const pitcherKey = team === "home" ? "homeStartingPitcher" : "awayStartingPitcher";
+      const nextLineup = [...current[key]];
+      nextLineup[index] = value;
+      return {
+        ...current,
+        [key]: nextLineup,
+        defense: {
+          ...current.defense,
+          [team]: makeDefense(nextLineup, current[positionKey], current[pitcherKey]),
+        },
+      };
+    });
+  }
+
+  function updateLineupPosition(team: TeamKey, index: number, value: LineupPosition) {
+    setGame((current) => {
+      const lineupKey = team === "home" ? "homeLineup" : "awayLineup";
+      const positionKey = team === "home" ? "homeLineupPositions" : "awayLineupPositions";
+      const pitcherKey = team === "home" ? "homeStartingPitcher" : "awayStartingPitcher";
+      const nextPositions = [...current[positionKey]];
+      nextPositions[index] = value;
+
+      return {
+        ...current,
+        [positionKey]: nextPositions,
+        defense: {
+          ...current.defense,
+          [team]: makeDefense(current[lineupKey], nextPositions, current[pitcherKey]),
+        },
+      };
+    });
+  }
+
+  function updateStartingPitcher(team: TeamKey, value: string) {
+    setGame((current) => {
+      const lineupKey = team === "home" ? "homeLineup" : "awayLineup";
+      const positionKey = team === "home" ? "homeLineupPositions" : "awayLineupPositions";
+      const pitcherKey = team === "home" ? "homeStartingPitcher" : "awayStartingPitcher";
+
+      return {
+        ...current,
+        [pitcherKey]: value,
+        defense: {
+          ...current.defense,
+          [team]: makeDefense(current[lineupKey], current[positionKey], value),
+        },
+      };
+    });
+  }
+
+  function updateSettings(nextSettings: Partial<GameSettings>) {
+    setGame((current) => ({
+      ...current,
+      settings: {
+        ...current.settings,
+        ...nextSettings,
+      },
+      awayLineupPositions:
+        nextSettings.dhEnabled === false
+          ? current.awayLineupPositions.map((position, index) => (position === "DH" ? defaultLineupPositions[index] : position))
+          : current.awayLineupPositions,
+      homeLineupPositions:
+        nextSettings.dhEnabled === false
+          ? current.homeLineupPositions.map((position, index) => (position === "DH" ? defaultLineupPositions[index] : position))
+          : current.homeLineupPositions,
+      defense:
+        nextSettings.dhEnabled === false
+          ? {
+              away: makeDefense(
+                current.awayLineup,
+                current.awayLineupPositions.map((position, index) =>
+                  position === "DH" ? defaultLineupPositions[index] : position,
+                ),
+                "",
+              ),
+              home: makeDefense(
+                current.homeLineup,
+                current.homeLineupPositions.map((position, index) =>
+                  position === "DH" ? defaultLineupPositions[index] : position,
+                ),
+                "",
+              ),
+            }
+          : current.defense,
+    }));
+  }
+
+  function record(action: ActionKey) {
+    setGame((current) => applyPlay(current, action, requiresPosition.has(action) ? selectedPosition : null));
+  }
+
+  function recordPitch(pitch: PitchKey) {
+    setGame((current) => applyPitch(current, pitch));
+  }
+
+  function placeCurrentBatterOnFirst() {
+    setGame((current) => {
+      if (current.status === "completed") return current;
+      return {
+        ...current,
+        bases: {
+          ...current.bases,
+          first: {
+            name: currentBatter(current),
+            team: battingTeam(current),
+            responsiblePitcher: current.defense[fieldingTeam(current)].P,
+          },
+        },
+      };
+    });
+    setSelectedBase("first");
+  }
+
+  function operateSelectedRunner(action: RunnerAction) {
+    if (!selectedBase) return;
+
+    setGame((current) => {
+      if (current.status === "completed") return current;
+      const runner = current.bases[selectedBase];
+      if (!runner) return current;
+
+      let nextOuts = current.outs;
+      let nextEarnedOuts = current.earnedOuts;
+      let nextEarnedOutsByPitcher = current.earnedOutsByPitcher;
+      let nextScore = current.score;
+      const nextBases = { ...current.bases, [selectedBase]: null };
+      let descriptionJa = "";
+      let code = "ADV";
+      let runEvents: RunEvent[] = [];
+
+      if (action === "out" || action === "caughtStealing") {
+        nextOuts += 1;
+        nextEarnedOuts += 1;
+        nextEarnedOutsByPitcher = addEarnedOutsByPitcher(current, 1);
+        descriptionJa = action === "caughtStealing" ? `${runner.name}が盗塁失敗でアウト` : `${runner.name}が走塁アウト`;
+        code = action === "caughtStealing" ? "CS" : "OOB";
+      } else {
+        const destination = action === "score" ? "home" : nextBase(selectedBase);
+        const isPassedBall = action === "passedBall";
+        const isWildPitch = action === "wildPitch";
+        if (destination === "home") {
+          nextScore = {
+            ...current.score,
+            [runner.team]: current.score[runner.team] + 1,
+          };
+          runEvents = [
+            makeRunEvent(
+              current,
+              runner,
+              action === "steal" ? "ホームスチールで得点" : isWildPitch ? "暴投で得点" : isPassedBall ? "捕逸で得点" : "走塁で得点",
+              isPassedBall,
+            ),
+          ];
+          descriptionJa =
+            action === "steal"
+              ? `${runner.name}がホームスチール成功`
+              : isWildPitch
+                ? `${runner.name}が暴投でホームイン`
+                : isPassedBall
+                  ? `${runner.name}が捕逸でホームイン`
+                  : `${runner.name}がホームイン`;
+          code = action === "steal" ? "SBH" : isWildPitch ? "WP" : isPassedBall ? "PB" : "R";
+        } else {
+          nextBases[destination] = isPassedBall ? { ...runner, earnedResponsible: false } : runner;
+          descriptionJa =
+            action === "steal"
+              ? `${runner.name}が${baseLabel(destination)}へ盗塁成功`
+              : isWildPitch
+                ? `${runner.name}が暴投で${baseLabel(destination)}へ進塁`
+                : isPassedBall
+                  ? `${runner.name}が捕逸で${baseLabel(destination)}へ進塁`
+              : `${runner.name}が${baseLabel(destination)}へ進塁`;
+          code = action === "steal" ? "SB" : isWildPitch ? "WP" : isPassedBall ? "PB" : "ADV";
+        }
+      }
+
+      const inningState = clearHalfInning(
+        { ...current, bases: nextBases, score: nextScore, earnedOutsByPitcher: nextEarnedOutsByPitcher },
+        nextOuts,
+        nextEarnedOuts,
+      );
+      const entry = makeHistoryEntry(current, {
+        type: "play",
+        descriptionJa,
+        code,
+        runEvents,
+        outsAfter: inningState.outs,
+        scoreAfter: nextScore,
+      });
+
+      return finishGameIfNeeded({
+        ...current,
+        ...inningState,
+        score: nextScore,
+        history: [entry, ...current.history],
+      });
+    });
+
+    setSelectedBase(null);
+  }
+
+  function adjustScore(team: TeamKey, amount: number) {
+    setGame((current) => {
+      if (current.status === "completed") return current;
+      return {
+        ...current,
+        score: {
+          ...current.score,
+          [team]: Math.max(0, current.score[team] + amount),
+        },
+      };
+    });
+  }
+
+  function saveTeamProfile() {
+    const name = teamNameInput.trim();
+    const players = teamPlayersInput.map((player) => player.trim()).filter(Boolean);
+    if (!name) return;
+
+    const nextTeam: TeamProfile = {
+      id: editingTeamId || makeId(),
+      name,
+      players,
+      inviteCode: editingTeamId
+        ? teams.find((team) => team.id === editingTeamId)?.inviteCode || makeInviteCode(teams)
+        : makeInviteCode(teams),
+      ownerUserId: editingTeamId ? teams.find((team) => team.id === editingTeamId)?.ownerUserId : currentUser?.internalUserId,
+      memberUserIds: editingTeamId
+        ? teams.find((team) => team.id === editingTeamId)?.memberUserIds || []
+        : currentUser
+          ? [currentUser.internalUserId]
+          : [],
+      roles: editingTeamId
+        ? teams.find((team) => team.id === editingTeamId)?.roles || {}
+        : currentUser
+          ? { [currentUser.internalUserId]: "admin" }
+          : {},
+    };
+
+    setTeams((current) => {
+      const nextTeams = [nextTeam, ...current.filter((team) => team.id !== nextTeam.id && team.name !== name)];
+      window.localStorage.setItem(TEAM_LIST_KEY, JSON.stringify(nextTeams));
+      return nextTeams;
+    });
+    setTeamNameInput("");
+    setTeamPlayersInput([]);
+    setMemberNameInput("");
+    setEditingTeamId("");
+    setOpenTeamMenuId("");
+  }
+
+  function editTeamProfile(team: TeamProfile) {
+    setEditingTeamId(team.id);
+    setTeamNameInput(team.name);
+    setTeamPlayersInput(team.players);
+    setMemberNameInput("");
+    setOpenTeamMenuId("");
+  }
+
+  function deleteTeamProfile(teamId: string) {
+    const target = teams.find((team) => team.id === teamId);
+    if (!target) return;
+    if (!window.confirm(`${target.name}を削除しますか？試合記録は残ります。`)) return;
+
+    setTeams((current) => {
+      const nextTeams = current.filter((team) => team.id !== teamId);
+      window.localStorage.setItem(TEAM_LIST_KEY, JSON.stringify(nextTeams));
+      return nextTeams;
+    });
+    if (selectedTeamId === teamId) {
+      setSelectedTeamId("");
+      setSelectedPlayerName("");
+      setViewMode("home");
+    }
+    if (editingTeamId === teamId) {
+      setEditingTeamId("");
+      setTeamNameInput("");
+      setTeamPlayersInput([]);
+      setMemberNameInput("");
+    }
+  }
+
+  function addMemberName() {
+    const name = memberNameInput.trim();
+    if (!name) return;
+    setTeamPlayersInput((current) => (current.includes(name) ? current : [...current, name]));
+    setMemberNameInput("");
+  }
+
+  function removeMemberName(name: string) {
+    setTeamPlayersInput((current) => current.filter((player) => player !== name));
+  }
+
+  function deleteStoredGame(gameId: string) {
+    const target = games.find((item) => item.id === gameId);
+    if (!target) return;
+    if (!window.confirm(`${target.awayTeam || "先攻未設定"} vs ${target.homeTeam || "後攻未設定"} の試合記録を削除しますか？`)) {
+      return;
+    }
+
+    setGames((current) => {
+      const nextGames = current.filter((item) => item.id !== gameId);
+      window.localStorage.setItem(GAME_LIST_KEY, JSON.stringify(nextGames));
+      return nextGames;
+    });
+    if (game.id === gameId) {
+      const next = makeInitialGame();
+      setGame(next);
+      window.localStorage.removeItem(STORAGE_KEY);
+      setViewMode("home");
+    }
+  }
+
+  function undoGameEnd() {
+    setGame((current) => {
+      if (current.status !== "completed") return current;
+      return {
+        ...current,
+        status: "inProgress",
+        endReason: undefined,
+        endedAt: undefined,
+        history: current.history.filter((entry, index) => !(index === 0 && entry.type === "game")),
+      };
+    });
+  }
+
+  function undoLastHistoryEntry() {
+    setGame((current) => {
+      if (current.history.length === 0 || current.status === "completed") return current;
+      return {
+        ...current,
+        history: current.history.slice(1),
+      };
+    });
+  }
+
+  function applyTeamProfile(side: TeamKey, profileId: string) {
+    const profile = teams.find((team) => team.id === profileId);
+    if (!profile) return;
+
+    setGame((current) => {
+      const lineup = [...defaultNames].map((fallback, index) => profile.players[index] || fallback);
+      const lineupKey = side === "home" ? "homeLineup" : "awayLineup";
+      const positionKey = side === "home" ? "homeLineupPositions" : "awayLineupPositions";
+      const pitcherKey = side === "home" ? "homeStartingPitcher" : "awayStartingPitcher";
+      const teamKey = side === "home" ? "homeTeam" : "awayTeam";
+
+      return {
+        ...current,
+        [teamKey]: profile.name,
+        [lineupKey]: lineup,
+        defense: {
+          ...current.defense,
+          [side]: makeDefense(lineup, current[positionKey], current[pitcherKey] || profile.players[0] || ""),
+        },
+      };
+    });
+  }
+
+  function openTeamDetail(teamId: string) {
+    setSelectedTeamId(teamId);
+    setSelectedPlayerName("");
+    setViewMode("teamDetail");
+  }
+
+  function openPlayerDetail(playerName: string) {
+    setSelectedPlayerName(playerName);
+    setSelectedPlateAppearanceId("");
+    setViewMode("playerDetail");
+  }
+
+  function recordSubstitution() {
+    const nextName = subName.trim();
+    if (!selectedPosition || !nextName) return;
+
+    setGame((current) => {
+      if (current.status === "completed") return current;
+      const team = fieldingTeam(current);
+      const oldName = current.defense[team][selectedPosition];
+      const descriptionJa = `${teamName(current, team)}: ${positionLabels[selectedPosition]}を${oldName}から${nextName}に交代`;
+      const entry = makeHistoryEntry(current, {
+        type: "substitution",
+        descriptionJa,
+        code: `SUB ${scoreCodes[selectedPosition]}`,
+      });
+
+      return {
+        ...current,
+        earnedOutsByPitcher:
+          selectedPosition === "P"
+            ? {
+                ...current.earnedOutsByPitcher,
+                [nextName]: current.outs,
+              }
+            : current.earnedOutsByPitcher,
+        defense: {
+          ...current.defense,
+          [team]: {
+            ...current.defense[team],
+            [selectedPosition]: nextName,
+          },
+        },
+        history: [entry, ...current.history],
+      };
+    });
+    setSubName("");
+  }
+
+  function recordBattingSubstitution() {
+    const nextName = battingSubName.trim();
+    if (!nextName) return;
+
+    setGame((current) => {
+      if (current.status === "completed") return current;
+      const team = battingTeam(current);
+      const lineupKey = team === "away" ? "awayLineup" : "homeLineup";
+      const lineupIndex = current.currentBatterIndex[team] % 9;
+      const oldName = current[lineupKey][lineupIndex];
+      const nextLineup = [...current[lineupKey]];
+      nextLineup[lineupIndex] = nextName;
+      const descriptionJa = `${teamName(current, team)}: ${lineupIndex + 1}番を${oldName}から${nextName}に交代`;
+      const entry = makeHistoryEntry(current, {
+        type: "substitution",
+        batter: nextName,
+        descriptionJa,
+        code: "PH",
+      });
+
+      return {
+        ...current,
+        [lineupKey]: nextLineup,
+        history: [entry, ...current.history],
+      };
+    });
+    setBattingSubName("");
+  }
+
+  function resetCount() {
+    setGame((current) => ({ ...current, count: { balls: 0, strikes: 0 } }));
+  }
+
+  function createNewGame() {
+    const next = makeInitialGame();
+    setGame(next);
+    setSubName("");
+    setBattingSubName("");
+    setSelectedPosition("SS");
+    setSelectedBase(null);
+    setViewMode("setup");
+  }
+
+  function openGame(savedGame: GameState) {
+    setGame(normalizeGame(savedGame));
+    setSubName("");
+    setBattingSubName("");
+    setSelectedPosition("SS");
+    setSelectedBase(null);
+    setViewMode(savedGame.status === "draft" ? "setup" : "score");
+  }
+
+  function startGame() {
+    setGame((current) => ({
+      ...current,
+      status: "inProgress",
+      startedAt: current.startedAt || nowString(),
+      updatedAt: nowString(),
+    }));
+    setViewMode("score");
+  }
+
+  function endCurrentGame(reason: EndReason) {
+    setGame((current) => finishGame(current, reason));
+  }
+
+  function resetGame() {
+    const next = makeInitialGame();
+    setGame(next);
+    setViewMode("home");
+    window.localStorage.removeItem(STORAGE_KEY);
+  }
+
+  if (!ready) {
+    return <main className="min-h-dvh p-4" />;
+  }
+
+  return (
+    <main className="mx-auto min-h-dvh w-full max-w-6xl px-4 pb-[calc(1.25rem+env(safe-area-inset-bottom))] pt-5 sm:px-6 lg:px-8">
+      <header className="mb-5 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold text-green-800">ScoreTap Baseball</p>
+          <h1 className="text-2xl font-black tracking-normal text-slate-950 sm:text-3xl">
+            1球ごとにつける野球スコア
+          </h1>
+        </div>
+        {viewMode !== "home" && (
+          <button
+            className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-sm font-bold text-slate-700 shadow-sm"
+            onClick={() => setViewMode("home")}
+          >
+            ホーム
+          </button>
+        )}
+      </header>
+
+      {viewMode === "home" ? (
+        <section className="grid gap-4">
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            {issuedAccount ? (
+              <div className="grid gap-4">
+                <div>
+                  <h2 className="text-lg font-black text-slate-950">初期情報を発行しました</h2>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    次の3つを控えてください。確認するとアプリを使い始められます。
+                  </p>
+                </div>
+                <div className="grid gap-2 rounded-md bg-amber-50 p-4">
+                  <div>
+                    <p className="text-xs font-black text-amber-800">ログインID</p>
+                    <p className="text-lg font-black text-slate-950">{issuedAccount.loginId}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-amber-800">初期パスワード</p>
+                    <p className="text-lg font-black text-slate-950">{issuedAccount.password}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-amber-800">復旧コード</p>
+                    <p className="text-lg font-black text-slate-950">{issuedAccount.recoveryCode}</p>
+                  </div>
+                </div>
+                <p className="rounded-md bg-slate-50 p-3 text-xs font-bold leading-5 text-slate-600">
+                  初期パスワードと復旧コードは、あとからこの画面では再表示しません。ログイン後の設定でID、表示名、パスワードを変更できます。
+                </p>
+                <button
+                  className="min-h-12 rounded-md bg-green-700 px-4 text-sm font-black text-white"
+                  onClick={() => setIssuedAccount(null)}
+                >
+                  控えたので始める
+                </button>
+              </div>
+            ) : (
+              <>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-slate-950">{currentUser ? "アカウント設定" : "ログイン"}</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  {currentUser
+                    ? "ID、表示名、パスワードはここで変更できます。"
+                    : "発行済みのIDとパスワードでログインします。"}
+                </p>
+              </div>
+              {currentUser && (
+                <button
+                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                  onClick={logoutAccount}
+                >
+                  ログアウト
+                </button>
+              )}
+            </div>
+            {currentUser ? (
+              <div className="mt-4 grid gap-3">
+                <div className="rounded-md bg-green-50 p-3">
+                  <p className="text-xs font-black text-green-800">ログイン中</p>
+                  <p className="mt-1 text-base font-black text-slate-950">
+                    {currentUser.displayName} / ID: {currentUser.loginId}
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-green-800">
+                    復旧コードは初回発行時に控えたものを使います。
+                  </p>
+                  </div>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                    placeholder="新しいログインID"
+                    value={newLoginIdInput}
+                    onChange={(event) => setNewLoginIdInput(event.target.value)}
+                  />
+                  <button
+                    className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                    disabled={!newLoginIdInput.trim()}
+                    onClick={changeLoginId}
+                  >
+                    ID変更
+                  </button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                    placeholder="表示名"
+                    value={displayNameInput}
+                    onChange={(event) => setDisplayNameInput(event.target.value)}
+                  />
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                    placeholder="新しいパスワード"
+                    type="password"
+                    value={newPasswordInput}
+                    onChange={(event) => setNewPasswordInput(event.target.value)}
+                  />
+                </div>
+                <button
+                  className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={!displayNameInput.trim() && !newPasswordInput.trim()}
+                  onClick={updateAccountSettings}
+                >
+                  設定を保存
+                </button>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base uppercase"
+                    placeholder="チーム招待コード"
+                    value={inviteCodeInput}
+                    onChange={(event) => setInviteCodeInput(event.target.value)}
+                  />
+                  <button
+                    className="min-h-12 rounded-md bg-green-700 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                    disabled={!inviteCodeInput.trim()}
+                    onClick={joinTeamByInviteCode}
+                  >
+                    参加
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-3">
+                <input
+                  className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                  placeholder="ログインID"
+                  value={loginIdInput}
+                  onChange={(event) => setLoginIdInput(event.target.value)}
+                />
+                <input
+                  className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                  placeholder="パスワード"
+                  type="password"
+                  value={loginPasswordInput}
+                  onChange={(event) => setLoginPasswordInput(event.target.value)}
+                />
+                <button
+                  className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={!loginIdInput.trim() || !loginPasswordInput.trim()}
+                  onClick={loginAccount}
+                >
+                  ログイン
+                </button>
+                <div className="rounded-md bg-slate-50 p-3">
+                  <p className="text-sm font-black text-slate-950">はじめて使う場合</p>
+                  <p className="mt-1 text-xs font-bold leading-5 text-slate-500">
+                    ボタンを押すと、初期IDと初期パスワードが発行されます。ログイン後に設定から変更できます。
+                  </p>
+                  <button
+                    className="mt-3 min-h-12 w-full rounded-md bg-green-700 px-4 text-sm font-black text-white"
+                    onClick={issueAccount}
+                  >
+                    IDと初期パスワードを発行
+                  </button>
+                </div>
+              </div>
+            )}
+            {authMessage && <p className="mt-3 rounded-md bg-amber-50 p-3 text-sm font-bold text-amber-800">{authMessage}</p>}
+            <p className="mt-3 text-xs font-bold leading-5 text-slate-500">
+              現在はローカル保存の試作です。本番ではパスワードをサーバー側で安全にハッシュ化し、復旧コードで本人確認します。
+            </p>
+              </>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-white p-5 shadow-panel sm:p-6">
+            <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
+              <div>
+                <h2 className="text-xl font-black text-slate-950">ホーム</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  新しい試合記録を作るか、保存済みの試合結果を開きます。
+                </p>
+              </div>
+              <button
+                className="min-h-[3.25rem] rounded-md bg-green-700 px-5 py-4 text-base font-black text-white shadow-sm"
+                onClick={createNewGame}
+              >
+                新しい試合記録を作る
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            <h2 className="mb-3 text-lg font-black text-slate-950">試合結果一覧</h2>
+            {games.length === 0 ? (
+              <p className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-500">
+                まだ保存された試合はありません。
+              </p>
+            ) : (
+              <ol className="grid gap-3">
+                {games.map((savedGame) => (
+                  <li
+                    key={savedGame.id}
+                    className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[1fr_auto] sm:items-center"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-slate-500">
+                        {savedGame.date} / {savedGame.status === "completed" ? endReasonLabel(savedGame.endReason) : "記録中"}
+                      </p>
+                      <p className="mt-1 truncate text-base font-black text-slate-950">
+                        {savedGame.awayTeam || "先攻未設定"} {savedGame.score.away} - {savedGame.score.home}{" "}
+                        {savedGame.homeTeam || "後攻未設定"}
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-600">
+                        {savedGame.status === "completed"
+                          ? winnerLabel(savedGame)
+                          : `${savedGame.inning}回${halfLabel(savedGame.half)} / アウト ${savedGame.outs}`}
+                      </p>
+                    </div>
+                    <div className="relative flex items-center gap-2">
+                      <button
+                        className="min-h-11 rounded-md bg-slate-950 px-4 text-sm font-black text-white"
+                        onClick={() => openGame(savedGame)}
+                      >
+                        開く
+                      </button>
+                      <button
+                        className="grid h-11 w-11 place-items-center rounded-md border border-slate-300 bg-white text-lg font-black text-slate-700"
+                        onClick={() => setOpenGameMenuId((current) => (current === savedGame.id ? "" : savedGame.id))}
+                        aria-label="試合操作"
+                      >
+                        ⋯
+                      </button>
+                      {openGameMenuId === savedGame.id && (
+                        <div className="absolute right-0 top-12 z-10 grid min-w-32 gap-1 rounded-md border border-slate-200 bg-white p-1 shadow-panel">
+                          <button
+                            className="rounded-md px-3 py-2 text-left text-sm font-black text-red-700 hover:bg-red-50"
+                            onClick={() => deleteStoredGame(savedGame.id)}
+                          >
+                            削除
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            <h2 className="mb-3 text-lg font-black text-slate-950">チーム・メンバー登録</h2>
+            {editingTeamId && (
+              <p className="mb-3 rounded-md bg-amber-50 p-3 text-sm font-bold text-amber-800">
+                チームを編集中です。保存すると上書きされます。
+              </p>
+            )}
+            <div className="grid gap-3">
+              <input
+                className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                placeholder="チーム名"
+                value={teamNameInput}
+                onChange={(event) => setTeamNameInput(event.target.value)}
+              />
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <input
+                  className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                  placeholder="メンバー名"
+                  value={memberNameInput}
+                  onChange={(event) => setMemberNameInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addMemberName();
+                    }
+                  }}
+                />
+                <button
+                  className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={!memberNameInput.trim()}
+                  onClick={addMemberName}
+                >
+                  追加
+                </button>
+              </div>
+              {teamPlayersInput.length > 0 && (
+                <div className="flex flex-wrap gap-2 rounded-md bg-slate-50 p-3">
+                  {teamPlayersInput.map((player) => (
+                    <button
+                      key={player}
+                      className="rounded-md bg-white px-3 py-2 text-sm font-black text-slate-800 shadow-sm"
+                      onClick={() => removeMemberName(player)}
+                    >
+                      {player} ×
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <button
+                  className="min-h-12 flex-1 rounded-md bg-green-700 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={!teamNameInput.trim()}
+                  onClick={saveTeamProfile}
+                >
+                  {editingTeamId ? "チームを更新" : "チームを保存"}
+                </button>
+                {editingTeamId && (
+                  <button
+                    className="min-h-12 rounded-md border border-slate-300 bg-white px-4 text-sm font-black text-slate-700"
+                    onClick={() => {
+                      setEditingTeamId("");
+                      setTeamNameInput("");
+                      setTeamPlayersInput([]);
+                      setMemberNameInput("");
+                    }}
+                  >
+                    キャンセル
+                  </button>
+                )}
+              </div>
+            </div>
+            {teams.length > 0 && (
+              <div className="mt-3 grid gap-2">
+                {teams.map((team) => (
+                  <div
+                    key={team.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 p-3"
+                  >
+                    <div>
+                      <p className="text-sm font-black text-slate-950">{team.name}</p>
+                      <p className="text-xs font-bold text-slate-500">
+                        {team.players.length}人登録 / 招待コード {team.inviteCode}
+                      </p>
+                    </div>
+                    <div className="relative flex gap-2">
+                      <button
+                        className="min-h-10 rounded-md bg-slate-950 px-3 text-xs font-black text-white"
+                        onClick={() => openTeamDetail(team.id)}
+                      >
+                        詳細
+                      </button>
+                      <button
+                        className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-xs font-black text-slate-700"
+                        onClick={() => applyTeamProfile("away", team.id)}
+                      >
+                        先攻に使う
+                      </button>
+                      <button
+                        className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-xs font-black text-slate-700"
+                        onClick={() => applyTeamProfile("home", team.id)}
+                      >
+                        後攻に使う
+                      </button>
+                      <button
+                        className="grid h-10 w-10 place-items-center rounded-md border border-slate-300 bg-white text-lg font-black text-slate-700"
+                        onClick={() => setOpenTeamMenuId((current) => (current === team.id ? "" : team.id))}
+                        aria-label="チーム操作"
+                      >
+                        ⋯
+                      </button>
+                      {openTeamMenuId === team.id && (
+                        <div className="absolute right-0 top-11 z-10 grid min-w-32 gap-1 rounded-md border border-slate-200 bg-white p-1 shadow-panel">
+                          <button
+                            className="rounded-md px-3 py-2 text-left text-sm font-black text-slate-700 hover:bg-slate-50"
+                            onClick={() => editTeamProfile(team)}
+                          >
+                            編集
+                          </button>
+                          <button
+                            className="rounded-md px-3 py-2 text-left text-sm font-black text-red-700 hover:bg-red-50"
+                            onClick={() => deleteTeamProfile(team.id)}
+                          >
+                            削除
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+      ) : viewMode === "teamDetail" && selectedTeam ? (
+        <section className="grid gap-4">
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-green-800">チーム詳細</p>
+                <h2 className="text-2xl font-black text-slate-950">{selectedTeam.name}</h2>
+              </div>
+              <button
+                className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                onClick={() => setViewMode("home")}
+              >
+                一覧へ
+              </button>
+            </div>
+            {(() => {
+              const record = teamRecord(games, selectedTeam.name);
+              const relatedGames = teamGames(games, selectedTeam.name);
+              const joinedUsers = selectedTeam.memberUserIds
+                .map((userId) => users.find((user) => user.internalUserId === userId))
+                .filter((user): user is AppUser => Boolean(user));
+              return (
+                <div className="mt-4 grid gap-3">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-md bg-slate-100 p-3">
+                      <p className="text-xs font-bold text-slate-500">試合</p>
+                      <p className="text-2xl font-black text-slate-950">{relatedGames.length}</p>
+                    </div>
+                    <div className="rounded-md bg-slate-100 p-3">
+                      <p className="text-xs font-bold text-slate-500">勝敗</p>
+                      <p className="text-xl font-black text-slate-950">
+                        {record.wins}勝{record.losses}敗
+                      </p>
+                    </div>
+                    <div className="rounded-md bg-slate-100 p-3">
+                      <p className="text-xs font-bold text-slate-500">引分</p>
+                      <p className="text-2xl font-black text-slate-950">{record.draws}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-md bg-green-50 p-3">
+                    <p className="text-xs font-black text-green-800">招待コード</p>
+                    <p className="mt-1 text-lg font-black text-slate-950">{selectedTeam.inviteCode}</p>
+                    <p className="mt-1 text-xs font-bold text-green-800">
+                      参加中: {joinedUsers.length ? joinedUsers.map((user) => user.displayName).join("、") : "未ログイン運用"}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            <h3 className="mb-3 text-lg font-black text-slate-950">選手一覧</h3>
+            {selectedTeam.players.length === 0 ? (
+              <p className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-500">
+                まだメンバーが登録されていません。
+              </p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {selectedTeam.players.map((player) => {
+                  const stats = playerStats(games, selectedTeam.name, player);
+                  const hits = stats.singles + stats.doubles + stats.triples + stats.homeRuns;
+                  const atBats = Math.max(
+                    0,
+                    stats.pa - stats.walks - stats.hitByPitch - stats.sacrificeBunts - stats.sacrificeFlies,
+                  );
+                  const obpDenominator = atBats + stats.walks + stats.hitByPitch + stats.sacrificeFlies;
+                  const totalBases = stats.singles + stats.doubles * 2 + stats.triples * 3 + stats.homeRuns * 4;
+                  const ops = (hits + stats.walks + stats.hitByPitch) / obpDenominator + totalBases / atBats;
+                  return (
+                    <button
+                      key={player}
+                      className="rounded-md border border-slate-200 bg-slate-50 p-3 text-left"
+                      onClick={() => openPlayerDetail(player)}
+                    >
+                      <p className="text-base font-black text-slate-950">{player}</p>
+                      <p className="mt-1 text-xs font-bold text-slate-500">
+                        {stats.games}試合 / 打率 {formatAverage(hits / atBats)} / OPS {formatAverage(ops)} / HR {stats.homeRuns}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+      ) : viewMode === "playerDetail" && selectedTeam ? (
+        <section className="grid gap-4">
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-green-800">{selectedTeam.name}</p>
+                <h2 className="text-2xl font-black text-slate-950">{selectedPlayerName}</h2>
+              </div>
+              <button
+                className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                onClick={() => setViewMode("teamDetail")}
+              >
+                チームへ
+              </button>
+            </div>
+            {(() => {
+              const stats = playerStats(games, selectedTeam.name, selectedPlayerName);
+              const appearances = playerPlateAppearances(games, selectedTeam.name, selectedPlayerName);
+              const hits = stats.singles + stats.doubles + stats.triples + stats.homeRuns;
+              const atBats = Math.max(0, stats.pa - stats.walks - stats.hitByPitch - stats.sacrificeBunts - stats.sacrificeFlies);
+              const onBaseDenominator = atBats + stats.walks + stats.hitByPitch + stats.sacrificeFlies;
+              const totalBases = stats.singles + stats.doubles * 2 + stats.triples * 3 + stats.homeRuns * 4;
+              const battingAverage = hits / atBats;
+              const onBasePercentage = (hits + stats.walks + stats.hitByPitch) / onBaseDenominator;
+              const sluggingPercentage = totalBases / atBats;
+              const ops = onBasePercentage + sluggingPercentage;
+              const pitchesPerPa = stats.pa ? stats.pitchesSeen / stats.pa : 0;
+              const walkRate = stats.pa ? stats.walks / stats.pa : 0;
+              const strikeoutRate = stats.pa ? stats.strikeouts / stats.pa : 0;
+              const walkToStrikeout = stats.strikeouts ? (stats.walks / stats.strikeouts).toFixed(2) : stats.walks ? "∞" : "0.00";
+              const foulPerPa = stats.pa ? stats.fouls / stats.pa : 0;
+              const statTiles = [
+                ["試合", stats.games],
+                ["打席", stats.pa],
+                ["打数", atBats],
+                ["打率", formatAverage(battingAverage)],
+                ["出塁率", formatAverage(onBasePercentage)],
+                ["長打率", formatAverage(sluggingPercentage)],
+                ["OPS", formatAverage(ops)],
+                ["安打", hits],
+                ["二塁打", stats.doubles],
+                ["三塁打", stats.triples],
+                ["本塁打", stats.homeRuns],
+                ["四球", stats.walks],
+                ["死球", stats.hitByPitch],
+                ["三振", stats.strikeouts],
+                ["犠打", stats.sacrificeBunts],
+                ["犠飛", stats.sacrificeFlies],
+                ["盗塁", stats.stolenBases],
+                ["盗塁死", stats.caughtStealing],
+                ["P/PA", pitchesPerPa.toFixed(1)],
+                ["BB%", formatPercent(walkRate)],
+                ["K%", formatPercent(strikeoutRate)],
+                ["BB/K", walkToStrikeout],
+                ["F/PA", foulPerPa.toFixed(1)],
+              ];
+              return (
+                <>
+                  <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-6">
+                    {statTiles.map(([label, value]) => (
+                      <div className="rounded-md bg-slate-100 p-2 text-center" key={label}>
+                        <p className="text-[11px] font-bold text-slate-500">{label}</p>
+                        <p className="text-base font-black text-slate-950">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 rounded-md bg-green-50 p-3">
+	                    <p className="text-sm font-black text-green-900">打席の傾向</p>
+	                    <p className="mt-1 text-sm font-bold leading-6 text-green-800">
+	                      {appearances.length}打席で平均{pitchesPerPa.toFixed(1)}球。BB%は{formatPercent(walkRate)}、
+	                      K%は{formatPercent(strikeoutRate)}、ファウルは1打席あたり{foulPerPa.toFixed(1)}球です。
+	                    </p>
+                  </div>
+                  <p className="mt-2 text-xs font-bold leading-5 text-slate-500">
+                    OPSは出塁率と長打率を足した総合的な打力の目安です。P/PAは1打席あたり球数、F/PAは1打席あたりファウル数です。
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            <h3 className="mb-3 text-lg font-black text-slate-950">投手データ</h3>
+            {(() => {
+              const pitching = pitcherStats(games, selectedTeam.name, selectedPlayerName);
+              if (pitching.games === 0) {
+                return (
+                  <p className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-500">
+                    投手としての登板データはまだありません。
+                  </p>
+                );
+              }
+
+              const strikeoutRate = pitching.battersFaced ? pitching.strikeouts / pitching.battersFaced : 0;
+              const walkRate = pitching.battersFaced ? pitching.walks / pitching.battersFaced : 0;
+              const inningsPitched = pitching.outs / 3;
+              const era = inningsPitched ? (pitching.earnedRuns * 9) / inningsPitched : 0;
+              const runAverage = inningsPitched ? (pitching.runsAllowed * 9) / inningsPitched : 0;
+              const whip = inningsPitched ? (pitching.walks + pitching.hitsAllowed) / inningsPitched : 0;
+              const strikeoutToWalk = pitching.walks
+                ? (pitching.strikeouts / pitching.walks).toFixed(2)
+                : pitching.strikeouts
+                  ? "∞"
+                  : "0.00";
+              const pitchTiles = [
+                ["登板", pitching.games],
+                ["投球回", formatInnings(pitching.outs)],
+                ["防御率", formatDecimal(era)],
+                ["RA/9", formatDecimal(runAverage)],
+                ["WHIP", formatDecimal(whip)],
+                ["K/BB", strikeoutToWalk],
+                ["K%", formatPercent(strikeoutRate)],
+                ["BB%", formatPercent(walkRate)],
+                ["BF", pitching.battersFaced],
+                ["球数", pitching.pitches],
+                ["P/BF", pitching.battersFaced ? (pitching.pitches / pitching.battersFaced).toFixed(1) : "0.0"],
+                ["被安打", pitching.hitsAllowed],
+                ["被本塁打", pitching.homeRunsAllowed],
+                ["四球", pitching.walks],
+                ["死球", pitching.hitByPitch],
+                ["奪三振", pitching.strikeouts],
+                ["失点", pitching.runsAllowed],
+                ["自責点", pitching.earnedRuns],
+              ];
+
+              return (
+                <>
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                    {pitchTiles.map(([label, value]) => (
+                      <div className="rounded-md bg-slate-100 p-2 text-center" key={label}>
+                        <p className="text-[11px] font-bold text-slate-500">{label}</p>
+                        <p className="text-base font-black text-slate-950">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-3 rounded-md bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-800">
+                    防御率は自責点 x 9 ÷ 投球回で計算。エラー出塁、捕逸、エラーがなければ3アウト後の得点は非自責として扱います。
+                  </p>
+                  <p className="mt-2 text-xs font-bold leading-5 text-slate-500">
+                    WHIPは1投球回あたりに出した安打と四球の数です。RA/9は自責点に限らず、全失点を9回あたりに直した数字です。
+                    BFは対戦打者、P/BFは1打者あたり球数です。
+                  </p>
+                </>
+              );
+            })()}
+          </div>
+
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            <h3 className="mb-3 text-lg font-black text-slate-950">関連プレー</h3>
+            <ol className="grid max-h-[28rem] gap-2 overflow-auto">
+              {playerPlateAppearances(games, selectedTeam.name, selectedPlayerName).map((appearance) => {
+                const summary = pitchSummary(appearance);
+                return (
+                  <li key={appearance.id}>
+                    <button
+                      className={`w-full rounded-md border p-3 text-left ${
+                        selectedPlateAppearanceId === appearance.id
+                          ? "border-slate-950 bg-slate-950 text-white"
+                          : "border-slate-200 bg-slate-50 text-slate-950"
+                      }`}
+                      onClick={() =>
+                        setSelectedPlateAppearanceId((current) => (current === appearance.id ? "" : appearance.id))
+                      }
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p
+                            className={`text-xs font-black ${
+                              selectedPlateAppearanceId === appearance.id ? "text-slate-300" : "text-slate-500"
+                            }`}
+                          >
+                            {appearance.gameDate} / {appearance.inning}回{halfLabel(appearance.half)}
+                          </p>
+                          <p className="mt-1 text-sm font-black">{appearance.result.descriptionJa}</p>
+                          <p
+                            className={`mt-1 text-xs font-bold ${
+                              selectedPlateAppearanceId === appearance.id ? "text-slate-300" : "text-slate-500"
+                            }`}
+                          >
+                            {appearance.result.code}
+                          </p>
+                        </div>
+                        <p className="shrink-0 rounded-md bg-white px-2 py-1 text-sm font-black text-green-800">
+                          {summary.total}球
+                        </p>
+                      </div>
+                    </button>
+                    {selectedPlateAppearanceId === appearance.id && (
+                      <div className="mt-2 rounded-md border border-slate-200 bg-white p-3">
+	              <div className="grid grid-cols-4 gap-2 text-center">
+                          <div className="rounded-md bg-slate-100 p-2">
+                            <p className="text-[11px] font-bold text-slate-500">球数</p>
+                            <p className="text-lg font-black text-slate-950">{summary.total}</p>
+                          </div>
+                          <div className="rounded-md bg-slate-100 p-2">
+                            <p className="text-[11px] font-bold text-slate-500">ボール</p>
+                            <p className="text-lg font-black text-slate-950">{summary.balls}</p>
+                          </div>
+                          <div className="rounded-md bg-slate-100 p-2">
+                            <p className="text-[11px] font-bold text-slate-500">ファウル</p>
+                            <p className="text-lg font-black text-slate-950">{summary.fouls}</p>
+                          </div>
+                          <div className="rounded-md bg-slate-100 p-2">
+                            <p className="text-[11px] font-bold text-slate-500">空振り</p>
+                            <p className="text-lg font-black text-slate-950">{summary.swingingStrikes}</p>
+                          </div>
+                        </div>
+                        {appearance.pitches.length === 0 ? (
+                          <p className="mt-3 rounded-md bg-slate-50 p-3 text-sm font-bold text-slate-500">
+                            この打席の1球記録はありません。
+                          </p>
+                        ) : (
+                          <ol className="mt-3 grid gap-2">
+                            {appearance.pitches.map((pitch, index) => (
+                              <li
+                                className="grid grid-cols-[3rem_1fr_auto] items-center gap-2 rounded-md bg-slate-50 p-2"
+                                key={pitch.id}
+                              >
+                                <p className="text-sm font-black text-slate-500">{index + 1}球目</p>
+                                <p className="text-sm font-black text-slate-950">{pitch.descriptionJa}</p>
+                                <p className="text-xs font-bold text-slate-500">
+                                  {pitch.countAfter ? countLabel(pitch.countAfter) : ""}
+                                </p>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        </section>
+      ) : viewMode === "setup" ? (
+        <section className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+          <div className="mb-5">
+            <h2 className="text-xl font-black text-slate-950">試合を作成</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              打順と守備位置を登録できます。試合中の選手交代はスコア画面でも変更できます。
+            </p>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="grid gap-1 text-sm font-bold text-slate-700">
+              日付
+              <input
+                type="date"
+                className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                value={game.date}
+                onChange={(event) => setGame({ ...game, date: event.target.value })}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-bold text-slate-700">
+              先攻チーム
+              <input
+                className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                placeholder="ビジター"
+                value={game.awayTeam}
+                onChange={(event) => setGame({ ...game, awayTeam: event.target.value })}
+              />
+            </label>
+            <label className="grid gap-1 text-sm font-bold text-slate-700">
+              後攻チーム
+              <input
+                className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                placeholder="ホーム"
+                value={game.homeTeam}
+                onChange={(event) => setGame({ ...game, homeTeam: event.target.value })}
+              />
+            </label>
+          </div>
+
+          {teams.length > 0 && (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm font-bold text-slate-700">
+                登録チームを先攻に使う
+                <select
+                  className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-base"
+                  defaultValue=""
+                  onChange={(event) => applyTeamProfile("away", event.target.value)}
+                >
+                  <option value="" disabled>
+                    選択
+                  </option>
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm font-bold text-slate-700">
+                登録チームを後攻に使う
+                <select
+                  className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-base"
+                  defaultValue=""
+                  onChange={(event) => applyTeamProfile("home", event.target.value)}
+                >
+                  <option value="" disabled>
+                    選択
+                  </option>
+                  {teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+
+          <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <h3 className="mb-3 text-sm font-black text-slate-800">試合設定</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="grid gap-1 text-sm font-bold text-slate-700">
+                予定イニング
+                <select
+                  className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-base"
+                  value={game.settings.scheduledInnings}
+                  onChange={(event) => updateSettings({ scheduledInnings: Number(event.target.value) })}
+                >
+                  <option value={5}>5回</option>
+                  <option value={6}>6回</option>
+                  <option value={7}>7回</option>
+                  <option value={9}>9回</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm font-bold text-slate-700">
+                コールド点差
+                <select
+                  className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-base disabled:bg-slate-100"
+                  value={game.settings.mercyRuns}
+                  disabled={!game.settings.mercyEnabled}
+                  onChange={(event) => updateSettings({ mercyRuns: Number(event.target.value) })}
+                >
+                  <option value={7}>7点差</option>
+                  <option value={10}>10点差</option>
+                  <option value={15}>15点差</option>
+                </select>
+              </label>
+              <label className="grid gap-1 text-sm font-bold text-slate-700">
+                コールド適用
+                <select
+                  className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-base disabled:bg-slate-100"
+                  value={game.settings.mercyAfterInning}
+                  disabled={!game.settings.mercyEnabled}
+                  onChange={(event) => updateSettings({ mercyAfterInning: Number(event.target.value) })}
+                >
+                  <option value={3}>3回以降</option>
+                  <option value={4}>4回以降</option>
+                  <option value={5}>5回以降</option>
+                  <option value={7}>7回以降</option>
+                </select>
+              </label>
+              <div className="grid gap-2 rounded-md bg-white p-3">
+                <label className="flex min-h-8 items-center gap-2 text-sm font-bold text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5"
+                    checked={game.settings.dhEnabled}
+                    onChange={(event) => updateSettings({ dhEnabled: event.target.checked })}
+                  />
+                  DH制
+                </label>
+                <label className="flex min-h-8 items-center gap-2 text-sm font-bold text-slate-700">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5"
+                    checked={game.settings.mercyEnabled}
+                    onChange={(event) => updateSettings({ mercyEnabled: event.target.checked })}
+                  />
+                  コールドあり
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            {(["away", "home"] as const).map((team) => (
+              <div key={team} className="grid gap-4">
+                <div>
+                  <h3 className="mb-2 text-sm font-black text-slate-800">
+                    {team === "away" ? "先攻" : "後攻"}のスタメン
+                  </h3>
+                  <div className="grid gap-2">
+                    {(team === "away" ? game.awayLineup : game.homeLineup).map((name, index) => (
+                      <label
+                        className="grid grid-cols-[3rem_1fr_6rem] items-center gap-2 text-sm font-bold text-slate-600"
+                        key={`${team}-${index}`}
+                      >
+                        {index + 1}番
+                        <input
+                          className="min-h-11 rounded-md border border-slate-300 px-3 text-base font-medium text-slate-900"
+                          value={name}
+                          onChange={(event) => updateLineup(team, index, event.target.value)}
+                        />
+                        <select
+                          className="min-h-11 rounded-md border border-slate-300 bg-white px-2 text-sm font-bold text-slate-800"
+                          value={(team === "away" ? game.awayLineupPositions : game.homeLineupPositions)[index]}
+                          onChange={(event) => updateLineupPosition(team, index, event.target.value as LineupPosition)}
+                        >
+                          {lineupPositionOptions.map((position) => (
+                            <option
+                              key={position}
+                              value={position}
+                              disabled={position === "DH" && !game.settings.dhEnabled}
+                            >
+                              {lineupPositionLabels[position]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <p className="rounded-md bg-slate-50 p-3 text-xs font-bold leading-5 text-slate-600">
+                  守備位置は打順の右側で選べます。DHを使う場合は「試合設定」でDH制をオンにしてください。
+                </p>
+                {game.settings.dhEnabled && (
+                  <label className="grid gap-1 text-sm font-bold text-slate-700">
+                    DH時の投手
+                    <input
+                      className="min-h-11 rounded-md border border-slate-300 px-3 text-base"
+                      placeholder="投手名"
+                      value={team === "away" ? game.awayStartingPitcher : game.homeStartingPitcher}
+                      onChange={(event) => updateStartingPitcher(team, event.target.value)}
+                    />
+                  </label>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <button
+              className="min-h-[3.25rem] flex-1 rounded-md bg-green-700 px-5 py-4 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+              disabled={!game.homeTeam || !game.awayTeam}
+              onClick={startGame}
+            >
+              スコア入力を開始
+            </button>
+            <button
+              className="min-h-[3.25rem] rounded-md border border-red-200 bg-red-50 px-5 py-4 text-base font-black text-red-700"
+              onClick={resetGame}
+            >
+              リセット
+            </button>
+          </div>
+        </section>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[1fr_0.92fr]">
+          <section className="grid gap-4">
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="rounded-md bg-slate-100 p-3">
+                  <p className="text-xs font-bold text-slate-500">イニング</p>
+                  <p className="text-xl font-black text-slate-950">
+                    {game.inning}回{halfLabel(game.half)}
+                  </p>
+                </div>
+                <div className="rounded-md bg-slate-100 p-3">
+                  <p className="text-xs font-bold text-slate-500">アウト</p>
+                  <p className="text-2xl font-black text-slate-950">{game.outs}</p>
+                </div>
+                <div className="rounded-md bg-slate-100 p-3">
+                  <p className="text-xs font-bold text-slate-500">カウント</p>
+                  <p className="text-2xl font-black text-slate-950">{countLabel(game.count)}</p>
+                </div>
+                <div className="rounded-md bg-slate-100 p-3">
+                  <p className="text-xs font-bold text-slate-500">打者</p>
+                  <p className="truncate text-base font-black text-slate-950">{batter}</p>
+                </div>
+	              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-[0.9fr_1.1fr]">
+                <div className="rounded-lg bg-slate-100 p-4">
+                  <p className="mb-3 text-xs font-black text-slate-500">BSO</p>
+                  <div className="grid gap-2">
+                    <CountDots label="B" active={game.count.balls} total={3} color="bg-green-500" />
+                    <CountDots label="S" active={game.count.strikes} total={2} color="bg-amber-400" />
+                    <CountDots label="O" active={game.outs} total={2} color="bg-red-500" />
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-slate-100 p-4">
+                  <p className="mb-2 text-xs font-black text-slate-500">塁状況</p>
+                  <div className="relative mx-auto h-32 w-32">
+                    <button
+                      className={`absolute left-1/2 top-1 h-12 w-12 -translate-x-1/2 rotate-45 rounded-md border-2 ${
+                        game.bases.second ? "border-amber-500 bg-amber-300" : "border-slate-300 bg-white"
+                      } ${selectedBase === "second" ? "ring-4 ring-slate-950/20" : ""}`}
+                      onClick={() => setSelectedBase("second")}
+                      aria-label="二塁"
+                    >
+                      <span className="-rotate-45 block text-[10px] font-black text-slate-800">
+                        {game.bases.second ? game.bases.second.name.slice(0, 2) : "2B"}
+                      </span>
+                    </button>
+                    <button
+                      className={`absolute right-1 top-1/2 h-12 w-12 -translate-y-1/2 rotate-45 rounded-md border-2 ${
+                        game.bases.first ? "border-amber-500 bg-amber-300" : "border-slate-300 bg-white"
+                      } ${selectedBase === "first" ? "ring-4 ring-slate-950/20" : ""}`}
+                      onClick={() => setSelectedBase("first")}
+                      aria-label="一塁"
+                    >
+                      <span className="-rotate-45 block text-[10px] font-black text-slate-800">
+                        {game.bases.first ? game.bases.first.name.slice(0, 2) : "1B"}
+                      </span>
+                    </button>
+                    <button
+                      className={`absolute left-1 top-1/2 h-12 w-12 -translate-y-1/2 rotate-45 rounded-md border-2 ${
+                        game.bases.third ? "border-amber-500 bg-amber-300" : "border-slate-300 bg-white"
+                      } ${selectedBase === "third" ? "ring-4 ring-slate-950/20" : ""}`}
+                      onClick={() => setSelectedBase("third")}
+                      aria-label="三塁"
+                    >
+                      <span className="-rotate-45 block text-[10px] font-black text-slate-800">
+                        {game.bases.third ? game.bases.third.name.slice(0, 2) : "3B"}
+                      </span>
+                    </button>
+                    <div className="absolute bottom-1 left-1/2 grid h-10 w-10 -translate-x-1/2 rotate-45 place-items-center rounded-md border-2 border-slate-300 bg-white">
+                      <span className="-rotate-45 text-[10px] font-black text-slate-500">H</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg bg-slate-950 p-4 text-white">
+                <div className="min-w-0 text-right">
+                  <p className="truncate text-sm font-bold text-slate-300">{game.awayTeam}</p>
+                  <p className="text-4xl font-black">{game.score.away}</p>
+                </div>
+                <div className="text-sm font-black text-slate-500">-</div>
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-300">{game.homeTeam}</p>
+                  <p className="text-4xl font-black">{game.score.home}</p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-3 gap-2">
+                {(["first", "second", "third"] as const).map((base) => (
+                  <button
+                    key={base}
+                    className={`min-h-16 rounded-md border p-2 text-center transition ${
+                      selectedBase === base
+                        ? "border-slate-950 bg-slate-950 text-white"
+                        : game.bases[base]
+                          ? "border-amber-400 bg-amber-100 text-slate-950"
+                          : "border-slate-200 bg-slate-50 text-slate-950"
+                    }`}
+                    onClick={() => setSelectedBase(base)}
+                  >
+                    <p className={`text-xs font-black ${selectedBase === base ? "text-slate-300" : "text-slate-500"}`}>
+                      {baseLabel(base)}
+                    </p>
+                    <p className="mt-1 truncate text-sm font-black">
+                      {game.bases[base]?.name || "空き"}
+                    </p>
+                  </button>
+                ))}
+              </div>
+
+              <p className="mt-3 text-sm font-bold text-green-800">
+                攻撃中: {teamName(game, currentTeam)} / 守備: {teamName(game, defenseTeam)}
+              </p>
+              <p className="mt-1 text-xs font-bold text-slate-500">
+                {game.settings.scheduledInnings}回制 / {game.settings.dhEnabled ? "DHあり" : "DHなし"} /{" "}
+                {game.settings.mercyEnabled
+                  ? `${game.settings.mercyAfterInning}回以降 ${game.settings.mercyRuns}点差コールド`
+                  : "コールドなし"}
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button
+                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  disabled={game.status === "completed" || game.history.length === 0}
+                  onClick={undoLastHistoryEntry}
+                >
+                  直近履歴だけ削除
+                </button>
+                <button
+                  className="min-h-10 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-black text-amber-800 disabled:bg-slate-100 disabled:text-slate-400"
+                  disabled={game.status !== "completed"}
+                  onClick={undoGameEnd}
+                >
+                  試合終了を取り消す
+                </button>
+              </div>
+              {game.status === "completed" ? (
+                <div className="mt-4 rounded-md border border-green-200 bg-green-50 p-3">
+                  <p className="text-sm font-black text-green-900">
+                    試合終了: {winnerLabel(game)}
+                  </p>
+                  <p className="mt-1 text-xs font-bold text-green-800">
+                    {endReasonLabel(game.endReason)} / 最終スコア {game.score.away}-{game.score.home}
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button
+                    className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                    onClick={() => endCurrentGame("manual")}
+                  >
+                    試合終了
+                  </button>
+                  <button
+                    className="min-h-11 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-black text-red-700"
+                    onClick={() => endCurrentGame("called")}
+                  >
+                    コールド終了
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-black text-slate-950">1球ごとに記録</h2>
+                <button
+                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  disabled={game.status === "completed"}
+                  onClick={resetCount}
+                >
+                  カウント修正
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {(Object.keys(pitchLabels) as PitchKey[]).map((pitch) => (
+                  <button
+                    key={pitch}
+                    className="min-h-16 rounded-md bg-amber-500 px-3 py-3 text-base font-black text-slate-950 shadow-sm active:scale-[0.99] disabled:bg-slate-200 disabled:text-slate-400"
+                    disabled={game.status === "completed"}
+                    onClick={() => recordPitch(pitch)}
+                  >
+                    {pitchLabels[pitch].label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-slate-950">ランナー操作</h2>
+                  <p className="mt-1 text-sm font-bold text-slate-500">
+                    {selectedRunner && selectedBase
+                      ? `${baseLabel(selectedBase)}の${selectedRunner.name}を操作`
+                      : "塁上のランナーをタップ"}
+                  </p>
+                </div>
+                <button
+                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  disabled={game.status === "completed" || Boolean(game.bases.first)}
+                  onClick={placeCurrentBatterOnFirst}
+                >
+                  打者を一塁へ
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <button
+                  className="min-h-12 rounded-md bg-amber-500 px-3 text-sm font-black text-slate-950 disabled:bg-slate-200 disabled:text-slate-400"
+                  disabled={game.status === "completed" || !selectedRunner}
+                  onClick={() => operateSelectedRunner("steal")}
+                >
+                  盗塁
+                </button>
+                <button
+                  className="min-h-12 rounded-md bg-green-700 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={game.status === "completed" || !selectedRunner}
+                  onClick={() => operateSelectedRunner("advance")}
+                >
+                  進塁
+                </button>
+                <button
+                  className="min-h-12 rounded-md bg-slate-950 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={game.status === "completed" || !selectedRunner}
+                  onClick={() => operateSelectedRunner("score")}
+                >
+                  ホームへ
+                </button>
+                <button
+                  className="min-h-12 rounded-md bg-blue-600 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={game.status === "completed" || !selectedRunner}
+                  onClick={() => operateSelectedRunner("wildPitch")}
+                >
+                  暴投
+                </button>
+                <button
+                  className="min-h-12 rounded-md bg-purple-600 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={game.status === "completed" || !selectedRunner}
+                  onClick={() => operateSelectedRunner("passedBall")}
+                >
+                  捕逸
+                </button>
+                <button
+                  className="min-h-12 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-black text-red-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  disabled={game.status === "completed" || !selectedRunner}
+                  onClick={() => operateSelectedRunner("caughtStealing")}
+                >
+                  盗塁死
+                </button>
+                <button
+                  className="min-h-12 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  disabled={game.status === "completed" || !selectedRunner}
+                  onClick={() => operateSelectedRunner("out")}
+                >
+                  アウト
+                </button>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {(["away", "home"] as const).map((team) => (
+                  <div className="rounded-md bg-slate-50 p-2" key={team}>
+                    <p className="truncate text-xs font-black text-slate-500">{teamName(game, team)}</p>
+                    <div className="mt-2 grid grid-cols-[1fr_1fr] gap-2">
+                      <button
+                        className="min-h-10 rounded-md border border-slate-300 bg-white text-sm font-black text-slate-700 disabled:bg-slate-100"
+                        disabled={game.status === "completed"}
+                        onClick={() => adjustScore(team, -1)}
+                      >
+                        -1
+                      </button>
+                      <button
+                        className="min-h-10 rounded-md bg-slate-950 text-sm font-black text-white disabled:bg-slate-300"
+                        disabled={game.status === "completed"}
+                        onClick={() => adjustScore(team, 1)}
+                      >
+                        +1
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <h2 className="mb-3 text-lg font-black text-slate-950">打席結果を記録</h2>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {(Object.keys(actionLabels) as ActionKey[])
+                  .filter((action) => action !== "strikeout")
+                  .map((action) => (
+                  <button
+                    key={action}
+                    className="min-h-16 rounded-md bg-green-700 px-3 py-3 text-base font-black text-white shadow-sm active:scale-[0.99] disabled:bg-slate-300"
+                    disabled={game.status === "completed"}
+                    onClick={() => record(action)}
+                  >
+                    {actionLabels[action]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-4">
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h2 className="text-lg font-black text-slate-950">守備位置をタップ</h2>
+                <p className="rounded-md bg-green-100 px-3 py-1 text-sm font-black text-green-900">
+                  {selectedPosition ? `${selectedPosition}: ${selectedDefender}` : "未選択"}
+                </p>
+              </div>
+              <div className="relative mx-auto aspect-square max-w-md overflow-hidden rounded-lg bg-field-grass">
+                <div className="absolute left-1/2 top-[47%] h-[47%] w-[47%] -translate-x-1/2 rotate-45 rounded-md bg-field-clay" />
+                <div className="absolute left-1/2 top-[51%] h-[39%] w-[39%] -translate-x-1/2 rotate-45 rounded-sm border-4 border-field-chalk/90" />
+                <div className="absolute left-1/2 top-[69%] h-[13%] w-[13%] -translate-x-1/2 rounded-full bg-field-clay" />
+                {fieldPositions.map((position) => (
+                  <button
+                    key={position.key}
+                    className={`absolute ${position.className} grid h-14 w-14 place-items-center rounded-md border-2 px-1 text-center text-xs font-black shadow-sm transition ${
+                      selectedPosition === position.key
+                        ? "border-white bg-slate-950 text-white"
+                        : "border-white/80 bg-white text-slate-950"
+                    }`}
+                    onClick={() => setSelectedPosition(position.key)}
+                    aria-label={positionLabels[position.key]}
+                  >
+                    <span>{position.key}</span>
+                    <span className="block max-w-12 truncate text-[10px] leading-3">
+                      {game.defense[defenseTeam][position.key]}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <h2 className="mb-3 text-lg font-black text-slate-950">守備交代</h2>
+              <div className="grid gap-2">
+                <p className="text-sm font-bold text-slate-600">
+                  {teamName(game, defenseTeam)} の {selectedPosition ? positionLabels[selectedPosition] : "守備位置"}:
+                  <span className="ml-1 text-slate-950">{selectedDefender || "未登録"}</span>
+                </p>
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                    placeholder="交代後の選手名"
+                    value={subName}
+                    disabled={game.status === "completed"}
+                    onChange={(event) => setSubName(event.target.value)}
+                  />
+                  <button
+                    className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                    disabled={game.status === "completed" || !selectedPosition || !subName.trim()}
+                    onClick={recordSubstitution}
+                  >
+                    交代
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <h2 className="mb-3 text-lg font-black text-slate-950">攻撃側の交代</h2>
+              <div className="grid gap-2">
+                <p className="text-sm font-bold text-slate-600">
+                  {teamName(game, currentTeam)} の現在の打者:
+                  <span className="ml-1 text-slate-950">{batter}</span>
+                </p>
+                <div className="grid grid-cols-[1fr_auto] gap-2">
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                    placeholder="代打・交代後の選手名"
+                    value={battingSubName}
+                    disabled={game.status === "completed"}
+                    onChange={(event) => setBattingSubName(event.target.value)}
+                  />
+                  <button
+                    className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                    disabled={game.status === "completed" || !battingSubName.trim()}
+                    onClick={recordBattingSubstitution}
+                  >
+                    交代
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <h2 className="mb-3 text-lg font-black text-slate-950">履歴</h2>
+              {game.history.length === 0 ? (
+                <p className="rounded-md bg-slate-50 p-4 text-sm font-bold text-slate-500">
+                  まだ記録はありません。
+                </p>
+              ) : (
+                <ol className="grid max-h-[32rem] gap-2 overflow-auto pr-1">
+                  {game.history.map((entry) => (
+                    <li key={entry.id} className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-xs font-black text-slate-500">
+                            {entry.inning}回{halfLabel(entry.half)} / {entry.batter}
+                          </p>
+                          <p className="mt-1 text-sm font-black text-slate-950">{entry.descriptionJa}</p>
+                          {entry.countAfter && (
+                            <p className="mt-1 text-xs font-bold text-slate-500">
+                              カウント {countLabel(entry.countAfter)}
+                            </p>
+                          )}
+                          {entry.runEvents?.length ? (
+                            <p className="mt-1 text-xs font-bold text-slate-500">
+                              得点 {entry.runEvents.length} / 自責点 {entry.runEvents.filter((run) => run.earned).length}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0 rounded-md bg-white px-2 py-1 text-sm font-black text-green-800">
+                          {entry.code}
+                        </div>
+                      </div>
+                      <p className="mt-2 text-xs font-bold text-slate-500">
+                        スコア {entry.scoreAfter.away}-{entry.scoreAfter.home} / アウト {entry.outsAfter}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
