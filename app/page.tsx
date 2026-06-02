@@ -2171,12 +2171,14 @@ export default function Home() {
             )}
             {authMessage && <p className="mt-3 rounded-md bg-amber-50 p-3 text-sm font-bold text-amber-800">{authMessage}</p>}
             <p className="mt-3 text-xs font-bold leading-5 text-slate-500">
-              現在はローカル保存の試作です。本番ではパスワードをサーバー側で安全にハッシュ化し、復旧コードで本人確認します。
+              ログインすると、試合記録やチーム情報をクラウドに同期できます。初期パスワードと復旧コードは必ず控えてください。
             </p>
               </>
             )}
           </div>
 
+          {currentUser && (
+            <>
           <div className="rounded-lg bg-white p-5 shadow-panel sm:p-6">
             <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-center">
               <div>
@@ -2384,6 +2386,8 @@ export default function Home() {
               </div>
             )}
           </div>
+            </>
+          )}
         </section>
       ) : viewMode === "teamDetail" && selectedTeam ? (
         <section className="grid gap-4">
