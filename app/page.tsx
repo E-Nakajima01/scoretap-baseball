@@ -117,6 +117,7 @@ export default function Home() {
   const [selectedBase, setSelectedBase] = useState<BaseKey | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("home");
   const [playInputMode, setPlayInputMode] = useState<"closed" | "category" | "hit" | "out" | "reach" | "sacrifice">("closed");
+  const [openScorePanel, setOpenScorePanel] = useState<"runner" | "substitution" | "manage" | "history" | null>(null);
   const [substitutionMode, setSubstitutionMode] = useState<"defense" | "pitcher" | "pinchHitter" | "pinchRunner">("defense");
   const [subName, setSubName] = useState("");
   const [battingSubName, setBattingSubName] = useState("");
@@ -2351,22 +2352,6 @@ export default function Home() {
                   ? `${game.settings.mercyAfterInning}回以降 ${game.settings.mercyRuns}点差コールド`
                   : "コールドなし"}
               </p>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button
-                  className="min-h-10 rounded-md border-2 border-blue-700 bg-white px-3 text-sm font-black text-blue-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
-                  disabled={!canUndoGame}
-                  onClick={restorePreviousGameState}
-                >
-                  1つ戻す
-                </button>
-                <button
-                  className="min-h-10 rounded-md border-2 border-orange-700 bg-white px-3 text-sm font-black text-orange-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
-                  disabled={game.status !== "completed"}
-                  onClick={undoGameEnd}
-                >
-                  試合終了を取り消す
-                </button>
-              </div>
               {game.status === "completed" ? (
                 <div className="mt-4 rounded-md border border-green-200 bg-green-50 p-3">
                   <p className="text-sm font-black text-green-900">
@@ -2376,34 +2361,28 @@ export default function Home() {
                     {endReasonLabel(game.endReason)} / 最終スコア {game.score.away}-{game.score.home}
                   </p>
                 </div>
-              ) : (
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <button
-                    className="min-h-11 rounded-md bg-red-800 px-3 text-sm font-black text-white shadow-sm"
-                    onClick={() => endCurrentGame("manual")}
-                  >
-                    試合終了
-                  </button>
-                  <button
-                    className="min-h-11 rounded-md bg-red-800 px-3 text-sm font-black text-white shadow-sm"
-                    onClick={() => endCurrentGame("called")}
-                  >
-                    コールド終了
-                  </button>
-                </div>
-              )}
+              ) : null}
             </div>
 
             <div className="rounded-lg bg-white p-4 shadow-panel sm:col-start-2">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-black text-slate-950">1球ごとに記録</h2>
-                <button
-                  className="min-h-10 rounded-md border-2 border-red-800 bg-white px-3 text-sm font-black text-red-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
-                  disabled={game.status === "completed"}
-                  onClick={resetCount}
-                >
-                  カウント修正
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    className="min-h-10 rounded-md border-2 border-blue-700 bg-white px-3 text-sm font-black text-blue-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
+                    disabled={!canUndoGame}
+                    onClick={restorePreviousGameState}
+                  >
+                    1つ戻す
+                  </button>
+                  <button
+                    className="min-h-10 rounded-md border-2 border-red-800 bg-white px-3 text-sm font-black text-red-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
+                    disabled={game.status === "completed"}
+                    onClick={resetCount}
+                  >
+                    カウント修正
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {(Object.keys(pitchLabels) as PitchKey[]).map((pitch) => (
@@ -2424,8 +2403,29 @@ export default function Home() {
               >
                 インプレー・打席結果を入力
               </button>
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                {[
+                  ["runner", "ランナー"],
+                  ["substitution", "交代"],
+                  ["manage", "その他"],
+                  ["history", "履歴"],
+                ].map(([panel, label]) => (
+                  <button
+                    key={panel}
+                    className={`min-h-11 rounded-md px-2 text-sm font-black ${
+                      openScorePanel === panel
+                        ? "bg-blue-900 text-white ring-4 ring-blue-900/25"
+                        : "border-2 border-slate-500 bg-white text-slate-900"
+                    }`}
+                    onClick={() => setOpenScorePanel((current) => (current === panel ? null : (panel as typeof openScorePanel)))}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
+            {(openScorePanel === "runner" || selectedRunner) && (
             <div className="rounded-lg bg-white p-4 shadow-panel sm:col-start-2">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
@@ -2442,6 +2442,24 @@ export default function Home() {
                   打者を一塁へ
                 </button>
               </div>
+              {openScorePanel !== "runner" && selectedRunner && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="min-h-12 rounded-md bg-blue-800 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
+                    disabled={game.status === "completed"}
+                    onClick={() => operateSelectedRunner("advance")}
+                  >
+                    次の塁へ
+                  </button>
+                  <button
+                    className="min-h-12 rounded-md bg-blue-900 px-3 text-sm font-black text-white"
+                    onClick={() => setOpenScorePanel("runner")}
+                  >
+                    全操作を開く
+                  </button>
+                </div>
+              )}
+              {openScorePanel === "runner" && (
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <button
                   className="min-h-12 rounded-md bg-blue-800 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
@@ -2500,31 +2518,11 @@ export default function Home() {
                   走塁アウト
                 </button>
               </div>
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                {(["away", "home"] as const).map((team) => (
-                  <div className="rounded-md bg-slate-50 p-2" key={team}>
-                    <p className="truncate text-xs font-black text-slate-800">{teamName(game, team)}</p>
-                    <div className="mt-2 grid grid-cols-[1fr_1fr] gap-2">
-                      <button
-                        className="min-h-10 rounded-md border-2 border-slate-500 bg-white text-sm font-black text-slate-900 disabled:bg-slate-200 disabled:text-slate-700"
-                        disabled={game.status === "completed"}
-                        onClick={() => adjustScore(team, -1)}
-                      >
-                        -1
-                      </button>
-                      <button
-                        className="min-h-10 rounded-md bg-green-800 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
-                        disabled={game.status === "completed"}
-                        onClick={() => adjustScore(team, 1)}
-                      >
-                        +1
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
+            )}
 
+            {playInputMode !== "closed" && (
             <div className="rounded-lg bg-white p-4 shadow-panel sm:col-start-2">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
@@ -2533,26 +2531,15 @@ export default function Home() {
                     まず大分類を選んでから、細かい結果を押します。
                   </p>
                 </div>
-                {playInputMode !== "closed" && (
-                  <button
-                    className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
-                    onClick={() => setPlayInputMode("closed")}
-                  >
-                    閉じる
-                  </button>
-                )}
+                <button
+                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                  onClick={() => setPlayInputMode("closed")}
+                >
+                  閉じる
+                </button>
               </div>
 
-              {playInputMode === "closed" ? (
-                <button
-                  className="min-h-14 w-full rounded-md bg-green-700 px-4 text-base font-black text-white shadow-sm disabled:bg-slate-300"
-                  disabled={game.status === "completed"}
-                  onClick={() => setPlayInputMode("category")}
-                >
-                  結果を選ぶ
-                </button>
-              ) : (
-                <div className="grid gap-3">
+              <div className="grid gap-3">
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {[
                       ["hit", "ヒット"],
@@ -2645,12 +2632,13 @@ export default function Home() {
                       ))}
                     </div>
                   )}
-                </div>
-              )}
+              </div>
             </div>
+            )}
           </section>
 
           <section className="grid gap-4 sm:col-start-2">
+            {(playInputMode !== "closed" || openScorePanel === "substitution") && (
             <div className="rounded-lg bg-white p-4 shadow-panel">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-black text-slate-950">守備位置をタップ</h2>
@@ -2681,7 +2669,9 @@ export default function Home() {
                 ))}
               </div>
             </div>
+            )}
 
+            {openScorePanel === "substitution" && (
             <div className="rounded-lg bg-white p-4 shadow-panel">
               <h2 className="mb-3 text-lg font-black text-slate-950">選手交代</h2>
               <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -2778,7 +2768,66 @@ export default function Home() {
                 </div>
               )}
             </div>
+            )}
 
+            {openScorePanel === "manage" && (
+            <div className="rounded-lg bg-white p-4 shadow-panel">
+              <h2 className="text-lg font-black text-slate-950">その他・管理</h2>
+              <p className="mt-1 text-sm font-black text-slate-800">
+                試合終了や手動得点補正など、誤操作しやすい操作をまとめています。
+              </p>
+              <div className="mt-3 grid gap-3">
+                <button
+                  className="min-h-11 rounded-md border-2 border-orange-700 bg-white px-3 text-sm font-black text-orange-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
+                  disabled={game.status !== "completed"}
+                  onClick={undoGameEnd}
+                >
+                  試合終了を取り消す
+                </button>
+                {game.status !== "completed" && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      className="min-h-12 rounded-md bg-red-800 px-3 text-sm font-black text-white shadow-sm"
+                      onClick={() => endCurrentGame("manual")}
+                    >
+                      試合終了
+                    </button>
+                    <button
+                      className="min-h-12 rounded-md bg-red-800 px-3 text-sm font-black text-white shadow-sm"
+                      onClick={() => endCurrentGame("called")}
+                    >
+                      コールド終了
+                    </button>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2">
+                  {(["away", "home"] as const).map((team) => (
+                    <div className="rounded-md border border-slate-300 bg-white p-2" key={team}>
+                      <p className="truncate text-xs font-black text-slate-800">{teamName(game, team)}</p>
+                      <div className="mt-2 grid grid-cols-[1fr_1fr] gap-2">
+                        <button
+                          className="min-h-10 rounded-md border-2 border-slate-500 bg-white text-sm font-black text-slate-900 disabled:bg-slate-200 disabled:text-slate-700"
+                          disabled={game.status === "completed"}
+                          onClick={() => adjustScore(team, -1)}
+                        >
+                          -1
+                        </button>
+                        <button
+                          className="min-h-10 rounded-md bg-green-800 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
+                          disabled={game.status === "completed"}
+                          onClick={() => adjustScore(team, 1)}
+                        >
+                          +1
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            )}
+
+            {openScorePanel === "history" && (
             <div className="rounded-lg bg-white p-4 shadow-panel">
               <h2 className="mb-3 text-lg font-black text-slate-950">履歴</h2>
               {game.history.length === 0 ? (
@@ -2818,6 +2867,7 @@ export default function Home() {
                 </ol>
               )}
             </div>
+            )}
           </section>
         </div>
         </>
