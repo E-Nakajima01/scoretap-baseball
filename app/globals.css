@@ -43,6 +43,12 @@ button {
   touch-action: manipulation;
 }
 
+@media (orientation: landscape) {
+  .score-landscape-hint {
+    display: none;
+  }
+}
+
 @supports (padding: max(0px)) {
   body {
     padding-bottom: env(safe-area-inset-bottom);
