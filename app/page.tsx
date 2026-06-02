@@ -1413,7 +1413,7 @@ export default function Home() {
                       {openGameMenuId === savedGame.id && (
                         <div className="absolute right-0 top-12 z-10 grid min-w-32 gap-1 rounded-md border border-slate-200 bg-white p-1 shadow-panel">
                           <button
-                            className="rounded-md px-3 py-2 text-left text-sm font-black text-red-700 hover:bg-red-50"
+                            className="rounded-md bg-red-800 px-3 py-2 text-left text-sm font-black text-white hover:bg-red-900"
                             onClick={() => deleteStoredGame(savedGame.id)}
                           >
                             削除
@@ -1572,7 +1572,7 @@ export default function Home() {
                               編集
                             </button>
                             <button
-                              className="rounded-md px-3 py-2 text-left text-sm font-black text-red-700 hover:bg-red-50"
+                              className="rounded-md bg-red-800 px-3 py-2 text-left text-sm font-black text-white hover:bg-red-900"
                               onClick={() => deleteTeamProfile(team.id)}
                             >
                               削除
@@ -2198,7 +2198,7 @@ export default function Home() {
               スコア入力を開始
             </button>
             <button
-              className="min-h-[3.25rem] rounded-md border border-red-200 bg-red-50 px-5 py-4 text-base font-black text-red-700"
+              className="min-h-[3.25rem] rounded-md bg-red-800 px-5 py-4 text-base font-black text-white shadow-sm hover:bg-red-900"
               onClick={resetGame}
             >
               リセット
@@ -2308,12 +2308,12 @@ export default function Home() {
 
               <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg bg-slate-950 p-4 text-white">
                 <div className="min-w-0 text-right">
-                  <p className="truncate text-sm font-bold text-slate-300">{game.awayTeam}</p>
+                  <p className="truncate text-sm font-black text-white">{game.awayTeam}</p>
                   <p className="text-4xl font-black">{game.score.away}</p>
                 </div>
-                <div className="text-sm font-black text-slate-500">-</div>
+                <div className="text-sm font-black text-slate-200">-</div>
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold text-slate-300">{game.homeTeam}</p>
+                  <p className="truncate text-sm font-black text-white">{game.homeTeam}</p>
                   <p className="text-4xl font-black">{game.score.home}</p>
                 </div>
               </div>

@@ -46,6 +46,8 @@ button {
 button:disabled {
   cursor: not-allowed;
   opacity: 1;
+  filter: grayscale(0.35);
+  box-shadow: none;
 }
 
 @media (orientation: landscape) {
