@@ -796,6 +796,49 @@ export default function Home() {
     setSelectedBase(null);
   }
 
+  function recordBalk() {
+    if (game.status === "completed") return;
+    if (!game.bases.first && !game.bases.second && !game.bases.third) return;
+    pushUndoSnapshot(game);
+
+    setGame((current) => {
+      if (current.status === "completed") return current;
+      const nextBases = {
+        first: null,
+        second: current.bases.first,
+        third: current.bases.second,
+      };
+      const runEvents = current.bases.third ? [makeRunEvent(current, current.bases.third, "ボークで得点")] : [];
+      const nextScore = runEvents.length
+        ? {
+            ...current.score,
+            [current.bases.third!.team]: current.score[current.bases.third!.team] + runEvents.length,
+          }
+        : current.score;
+      const movedRunners = [
+        current.bases.third ? `${current.bases.third.name}がホームへ` : "",
+        current.bases.second ? `${current.bases.second.name}が三塁へ` : "",
+        current.bases.first ? `${current.bases.first.name}が二塁へ` : "",
+      ].filter(Boolean);
+      const entry = makeHistoryEntry(current, {
+        type: "play",
+        descriptionJa: `ボーク: ${movedRunners.join("、")}`,
+        code: "BK",
+        runEvents,
+        outsAfter: current.outs,
+        scoreAfter: nextScore,
+      });
+
+      return finishGameIfNeeded({
+        ...current,
+        bases: nextBases,
+        score: nextScore,
+        history: [entry, ...current.history],
+      });
+    });
+    setSelectedBase(null);
+  }
+
   function adjustScore(team: TeamKey, amount: number) {
     if (game.status === "completed") return;
     pushUndoSnapshot(game);
@@ -2431,6 +2474,13 @@ export default function Home() {
                   onClick={() => operateSelectedRunner("passedBall")}
                 >
                   捕逸で進塁
+                </button>
+                <button
+                  className="min-h-12 rounded-md bg-indigo-700 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={game.status === "completed" || (!game.bases.first && !game.bases.second && !game.bases.third)}
+                  onClick={recordBalk}
+                >
+                  ボークで全走者進塁
                 </button>
                 <button
                   className="min-h-12 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-black text-red-700 disabled:bg-slate-100 disabled:text-slate-400"
