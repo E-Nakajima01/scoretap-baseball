@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getSupabaseClient } from "@/lib/supabase";
 import {
   actionLabels,
@@ -60,6 +60,7 @@ import {
   GAME_LIST_KEY,
   STORAGE_KEY,
   TEAM_LIST_KEY,
+  UNDO_STACK_KEY,
   USER_LIST_KEY,
   readUndoStack,
   readStoredGames,
@@ -102,6 +103,7 @@ function CountDots({ label, active, total, color }: { label: string; active: num
 }
 
 export default function Home() {
+  const restoringCloudRef = useRef(false);
   const [game, setGame] = useState<GameState>(() => makeInitialGame());
   const [undoStack, setUndoStack] = useState<GameState[]>([]);
   const [games, setGames] = useState<GameState[]>([]);
@@ -112,8 +114,10 @@ export default function Home() {
   const [selectedPosition, setSelectedPosition] = useState<PositionKey | null>("SS");
   const [selectedBase, setSelectedBase] = useState<BaseKey | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("home");
+  const [substitutionMode, setSubstitutionMode] = useState<"defense" | "pitcher" | "pinchHitter" | "pinchRunner">("defense");
   const [subName, setSubName] = useState("");
   const [battingSubName, setBattingSubName] = useState("");
+  const [runnerSubName, setRunnerSubName] = useState("");
   const [teamNameInput, setTeamNameInput] = useState("");
   const [teamPlayersInput, setTeamPlayersInput] = useState<string[]>([]);
   const [memberNameInput, setMemberNameInput] = useState("");
@@ -185,6 +189,8 @@ export default function Home() {
   const selectedRunner = selectedBase ? game.bases[selectedBase] : null;
   const selectedDefender = selectedPosition ? game.defense[defenseTeam][selectedPosition] : "";
   const canUndoGame = undoStack.some((snapshot) => snapshot.id === game.id);
+  const selectedRunnerLabel =
+    selectedRunner && selectedBase ? `${baseLabel(selectedBase)}走者：${selectedRunner.name}を操作中` : "塁上のランナーをタップ";
   const matchingTeamForInput =
     teamNameInput.trim().length > 0
       ? teams.find((team) => team.name.trim().toLowerCase() === teamNameInput.trim().toLowerCase())
@@ -208,6 +214,7 @@ export default function Home() {
       return;
     }
 
+    restoringCloudRef.current = true;
     const { data: profile } = await supabase
       .from("scoretap_profiles")
       .select("id, login_id, display_name, recovery_code, created_at")
@@ -216,6 +223,7 @@ export default function Home() {
 
     if (!profile) {
       setCloudStatus("クラウドプロフィール未設定");
+      restoringCloudRef.current = false;
       return;
     }
 
@@ -231,6 +239,7 @@ export default function Home() {
     persistUsers(nextUsers);
     setCurrentUserId(cloudUser.internalUserId);
     window.localStorage.setItem(CURRENT_USER_KEY, cloudUser.internalUserId);
+    resetUserDataView();
 
     const { data: cloudState } = await supabase
       .from("scoretap_cloud_state")
@@ -249,13 +258,27 @@ export default function Home() {
         const nextGame = normalizeGame(cloudState.current_game as Partial<GameState>);
         setGame(nextGame);
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextGame));
+      } else {
+        const nextGame = makeInitialGame();
+        setGame(nextGame);
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextGame));
       }
+    } else {
+      const nextGame = makeInitialGame();
+      setTeams([]);
+      setGames([]);
+      setGame(nextGame);
+      window.localStorage.setItem(TEAM_LIST_KEY, JSON.stringify([]));
+      window.localStorage.setItem(GAME_LIST_KEY, JSON.stringify([]));
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextGame));
     }
 
     setCloudStatus("クラウド同期中");
+    restoringCloudRef.current = false;
   }
 
   async function saveCloudState() {
+    if (restoringCloudRef.current) return;
     const supabase = getSupabaseClient();
     if (!supabase || !currentUser) return;
     const { data: sessionData } = await supabase.auth.getSession();
@@ -275,6 +298,32 @@ export default function Home() {
   function persistUsers(nextUsers: AppUser[]) {
     setUsers(nextUsers);
     window.localStorage.setItem(USER_LIST_KEY, JSON.stringify(nextUsers));
+  }
+
+  function resetUserDataView(nextGame = makeInitialGame()) {
+    setGame(nextGame);
+    setGames([]);
+    setTeams([]);
+    setUndoStack([]);
+    setSelectedTeamId("");
+    setSelectedPlayerName("");
+    setSelectedPlateAppearanceId("");
+    setSelectedBase(null);
+    setSelectedPosition("SS");
+    setSubName("");
+    setBattingSubName("");
+    setRunnerSubName("");
+    setTeamNameInput("");
+    setTeamPlayersInput([]);
+    setMemberNameInput("");
+    setEditingTeamId("");
+    setOpenTeamMenuId("");
+    setOpenGameMenuId("");
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(GAME_LIST_KEY);
+    window.localStorage.removeItem(TEAM_LIST_KEY);
+    window.localStorage.removeItem(UNDO_STACK_KEY);
+    writeUndoStack([]);
   }
 
   function cloneGameState(snapshot: GameState) {
@@ -310,6 +359,7 @@ export default function Home() {
     const recoveryCode = makeRecoveryCode();
     const supabase = getSupabaseClient();
     let internalUserId = makeId();
+    const initialGame = makeInitialGame();
 
     if (supabase) {
       setCloudStatus("クラウド登録中");
@@ -347,9 +397,9 @@ export default function Home() {
 
       await supabase.from("scoretap_cloud_state").upsert({
         user_id: internalUserId,
-        teams,
-        games,
-        current_game: game,
+        teams: [],
+        games: [],
+        current_game: initialGame,
       });
     }
 
@@ -363,6 +413,7 @@ export default function Home() {
     };
     const nextUsers = [nextUser, ...users];
     persistUsers(nextUsers);
+    resetUserDataView(initialGame);
     setCurrentUserId(nextUser.internalUserId);
     window.localStorage.setItem(CURRENT_USER_KEY, nextUser.internalUserId);
     setIssuedAccount({ loginId: nextUser.loginId, password, recoveryCode: nextUser.recoveryCode });
@@ -410,6 +461,8 @@ export default function Home() {
     if (supabase) await supabase.auth.signOut();
     setCurrentUserId("");
     window.localStorage.removeItem(CURRENT_USER_KEY);
+    resetUserDataView();
+    setViewMode("home");
     setIssuedAccount(null);
     setCloudStatus(supabase ? "クラウド未ログイン" : "ローカル保存");
     setAuthMessage("ログアウトしました。");
@@ -648,6 +701,12 @@ export default function Home() {
 
   function operateSelectedRunner(action: RunnerAction) {
     if (!selectedBase || !selectedRunner || game.status === "completed") return;
+    if (
+      (action === "score" || action === "out" || action === "caughtStealing") &&
+      !window.confirm(`${selectedRunner.name}を${action === "score" ? "ホームへ進めますか？" : "アウトにしますか？"}`)
+    ) {
+      return;
+    }
     pushUndoSnapshot(game);
 
     setGame((current) => {
@@ -900,24 +959,25 @@ export default function Home() {
 
   function recordSubstitution() {
     const nextName = subName.trim();
-    if (!selectedPosition || !nextName || game.status === "completed") return;
+    const targetPosition = substitutionMode === "pitcher" ? "P" : selectedPosition;
+    if (!targetPosition || !nextName || game.status === "completed") return;
     pushUndoSnapshot(game);
 
     setGame((current) => {
       if (current.status === "completed") return current;
       const team = fieldingTeam(current);
-      const oldName = current.defense[team][selectedPosition];
-      const descriptionJa = `${teamName(current, team)}: ${positionLabels[selectedPosition]}を${oldName}から${nextName}に交代`;
+      const oldName = current.defense[team][targetPosition];
+      const descriptionJa = `${teamName(current, team)}: ${positionLabels[targetPosition]}を${oldName}から${nextName}に交代`;
       const entry = makeHistoryEntry(current, {
         type: "substitution",
         descriptionJa,
-        code: `SUB ${scoreCodes[selectedPosition]}`,
+        code: `SUB ${scoreCodes[targetPosition]}`,
       });
 
       return {
         ...current,
         earnedOutsByPitcher:
-          selectedPosition === "P"
+          targetPosition === "P"
             ? {
                 ...current.earnedOutsByPitcher,
                 [nextName]: current.outs,
@@ -927,7 +987,7 @@ export default function Home() {
           ...current.defense,
           [team]: {
             ...current.defense[team],
-            [selectedPosition]: nextName,
+            [targetPosition]: nextName,
           },
         },
         history: [entry, ...current.history],
@@ -964,6 +1024,33 @@ export default function Home() {
       };
     });
     setBattingSubName("");
+  }
+
+  function recordPinchRunner() {
+    const nextName = runnerSubName.trim();
+    if (!selectedBase || !selectedRunner || !nextName || game.status === "completed") return;
+    pushUndoSnapshot(game);
+    setGame((current) => {
+      const runner = current.bases[selectedBase];
+      if (!runner || current.status === "completed") return current;
+      const descriptionJa = `${teamName(current, runner.team)}: ${baseLabel(selectedBase)}走者を${runner.name}から${nextName}に交代`;
+      const entry = makeHistoryEntry(current, {
+        type: "substitution",
+        batter: nextName,
+        descriptionJa,
+        code: "PR",
+      });
+
+      return {
+        ...current,
+        bases: {
+          ...current.bases,
+          [selectedBase]: { ...runner, name: nextName },
+        },
+        history: [entry, ...current.history],
+      };
+    });
+    setRunnerSubName("");
   }
 
   function resetCount() {
@@ -2072,8 +2159,8 @@ export default function Home() {
           </div>
         </section>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[1fr_0.92fr]">
-          <section className="grid gap-4">
+        <div className="grid gap-4 md:grid-cols-[minmax(18rem,0.78fr)_minmax(0,1.22fr)] md:items-start">
+          <section className="grid gap-4 md:contents">
             <div className="sticky top-0 z-30 -mx-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-slate-200 bg-white/95 px-4 py-2 text-sm shadow-sm backdrop-blur sm:hidden">
               <div className="min-w-0">
                 <p className="font-black text-slate-950">
@@ -2093,7 +2180,7 @@ export default function Home() {
                 </p>
               </div>
             </div>
-            <div className="rounded-lg bg-white p-4 shadow-panel">
+            <div className="rounded-lg bg-white p-4 shadow-panel md:sticky md:top-3 md:col-start-1 md:row-span-6 md:max-h-[calc(100dvh-1.5rem)] md:overflow-auto">
               <div className="grid grid-cols-4 gap-2 text-center">
                 <div className="rounded-md bg-slate-100 p-3">
                   <p className="text-xs font-bold text-slate-500">イニング</p>
@@ -2255,7 +2342,7 @@ export default function Home() {
               )}
             </div>
 
-            <div className="rounded-lg bg-white p-4 shadow-panel">
+            <div className="rounded-lg bg-white p-4 shadow-panel md:col-start-2">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-black text-slate-950">1球ごとに記録</h2>
                 <button
@@ -2280,14 +2367,12 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-lg bg-white p-4 shadow-panel">
+            <div className="rounded-lg bg-white p-4 shadow-panel md:col-start-2">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-black text-slate-950">ランナー操作</h2>
                   <p className="mt-1 text-sm font-bold text-slate-500">
-                    {selectedRunner && selectedBase
-                      ? `${baseLabel(selectedBase)}の${selectedRunner.name}を操作`
-                      : "塁上のランナーをタップ"}
+                    {selectedRunnerLabel}
                   </p>
                 </div>
                 <button
@@ -2304,17 +2389,17 @@ export default function Home() {
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("steal")}
                 >
-                  盗塁
+                  盗塁成功
                 </button>
                 <button
                   className="min-h-12 rounded-md bg-green-700 px-3 text-sm font-black text-white disabled:bg-slate-300"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("advance")}
                 >
-                  進塁
+                  次の塁へ
                 </button>
                 <button
-                  className="min-h-12 rounded-md bg-slate-950 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  className="min-h-12 rounded-md border-2 border-slate-950 bg-slate-950 px-3 text-sm font-black text-white disabled:border-slate-300 disabled:bg-slate-300"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("score")}
                 >
@@ -2325,14 +2410,14 @@ export default function Home() {
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("wildPitch")}
                 >
-                  暴投
+                  暴投で進塁
                 </button>
                 <button
                   className="min-h-12 rounded-md bg-purple-600 px-3 text-sm font-black text-white disabled:bg-slate-300"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("passedBall")}
                 >
-                  捕逸
+                  捕逸で進塁
                 </button>
                 <button
                   className="min-h-12 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-black text-red-700 disabled:bg-slate-100 disabled:text-slate-400"
@@ -2342,11 +2427,11 @@ export default function Home() {
                   盗塁死
                 </button>
                 <button
-                  className="min-h-12 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  className="min-h-12 rounded-md border-2 border-red-300 bg-white px-3 text-sm font-black text-red-700 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("out")}
                 >
-                  アウト
+                  走塁アウト
                 </button>
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -2374,7 +2459,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="rounded-lg bg-white p-4 shadow-panel">
+            <div className="rounded-lg bg-white p-4 shadow-panel md:col-start-2">
               <h2 className="mb-3 text-lg font-black text-slate-950">打席結果を記録</h2>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {(Object.keys(actionLabels) as ActionKey[])
@@ -2393,7 +2478,7 @@ export default function Home() {
             </div>
           </section>
 
-          <section className="grid gap-4">
+          <section className="grid gap-4 md:col-start-2">
             <div className="rounded-lg bg-white p-4 shadow-panel">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-black text-slate-950">守備位置をタップ</h2>
@@ -2426,55 +2511,100 @@ export default function Home() {
             </div>
 
             <div className="rounded-lg bg-white p-4 shadow-panel">
-              <h2 className="mb-3 text-lg font-black text-slate-950">守備交代</h2>
-              <div className="grid gap-2">
-                <p className="text-sm font-bold text-slate-600">
-                  {teamName(game, defenseTeam)} の {selectedPosition ? positionLabels[selectedPosition] : "守備位置"}:
-                  <span className="ml-1 text-slate-950">{selectedDefender || "未登録"}</span>
-                </p>
-                <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <input
-                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
-                    placeholder="交代後の選手名"
-                    value={subName}
-                    disabled={game.status === "completed"}
-                    onChange={(event) => setSubName(event.target.value)}
-                  />
+              <h2 className="mb-3 text-lg font-black text-slate-950">選手交代</h2>
+              <div className="mb-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {[
+                  ["defense", "守備交代"],
+                  ["pitcher", "投手交代"],
+                  ["pinchHitter", "代打"],
+                  ["pinchRunner", "代走"],
+                ].map(([mode, label]) => (
                   <button
-                    className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
-                    disabled={game.status === "completed" || !selectedPosition || !subName.trim()}
-                    onClick={recordSubstitution}
+                    key={mode}
+                    className={`min-h-11 rounded-md px-3 text-sm font-black ${
+                      substitutionMode === mode ? "bg-slate-950 text-white" : "border border-slate-300 bg-white text-slate-700"
+                    }`}
+                    onClick={() => setSubstitutionMode(mode as typeof substitutionMode)}
                   >
-                    交代
+                    {label}
                   </button>
-                </div>
+                ))}
               </div>
-            </div>
 
-            <div className="rounded-lg bg-white p-4 shadow-panel">
-              <h2 className="mb-3 text-lg font-black text-slate-950">攻撃側の交代</h2>
-              <div className="grid gap-2">
-                <p className="text-sm font-bold text-slate-600">
-                  {teamName(game, currentTeam)} の現在の打者:
-                  <span className="ml-1 text-slate-950">{batter}</span>
-                </p>
-                <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <input
-                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
-                    placeholder="代打・交代後の選手名"
-                    value={battingSubName}
-                    disabled={game.status === "completed"}
-                    onChange={(event) => setBattingSubName(event.target.value)}
-                  />
-                  <button
-                    className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
-                    disabled={game.status === "completed" || !battingSubName.trim()}
-                    onClick={recordBattingSubstitution}
-                  >
-                    交代
-                  </button>
+              {(substitutionMode === "defense" || substitutionMode === "pitcher") && (
+                <div className="grid gap-2">
+                  <p className="text-sm font-bold text-slate-600">
+                    {teamName(game, defenseTeam)} の{" "}
+                    {substitutionMode === "pitcher" ? positionLabels.P : selectedPosition ? positionLabels[selectedPosition] : "守備位置"}:
+                    <span className="ml-1 text-slate-950">
+                      {substitutionMode === "pitcher" ? game.defense[defenseTeam].P : selectedDefender || "未登録"}
+                    </span>
+                  </p>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <input
+                      className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                      placeholder="交代後の選手名"
+                      value={subName}
+                      disabled={game.status === "completed"}
+                      onChange={(event) => setSubName(event.target.value)}
+                    />
+                    <button
+                      className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                      disabled={game.status === "completed" || (!selectedPosition && substitutionMode === "defense") || !subName.trim()}
+                      onClick={recordSubstitution}
+                    >
+                      交代
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {substitutionMode === "pinchHitter" && (
+                <div className="grid gap-2">
+                  <p className="text-sm font-bold text-slate-600">
+                    {teamName(game, currentTeam)} の現在の打者:
+                    <span className="ml-1 text-slate-950">{batter}</span>
+                  </p>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <input
+                      className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                      placeholder="代打の選手名"
+                      value={battingSubName}
+                      disabled={game.status === "completed"}
+                      onChange={(event) => setBattingSubName(event.target.value)}
+                    />
+                    <button
+                      className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                      disabled={game.status === "completed" || !battingSubName.trim()}
+                      onClick={recordBattingSubstitution}
+                    >
+                      交代
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {substitutionMode === "pinchRunner" && (
+                <div className="grid gap-2">
+                  <p className="text-sm font-bold text-slate-600">{selectedRunnerLabel}</p>
+                  <div className="grid grid-cols-[1fr_auto] gap-2">
+                    <input
+                      className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                      placeholder="代走の選手名"
+                      value={runnerSubName}
+                      disabled={game.status === "completed" || !selectedRunner}
+                      onChange={(event) => setRunnerSubName(event.target.value)}
+                    />
+                    <button
+                      className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                      disabled={game.status === "completed" || !selectedRunner || !runnerSubName.trim()}
+                      onClick={recordPinchRunner}
+                    >
+                      交代
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="rounded-lg bg-white p-4 shadow-panel">
