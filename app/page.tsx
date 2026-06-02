@@ -61,10 +61,12 @@ import {
   STORAGE_KEY,
   TEAM_LIST_KEY,
   USER_LIST_KEY,
+  readUndoStack,
   readStoredGames,
   readStoredTeams,
   readStoredUsers,
   upsertStoredGame,
+  writeUndoStack,
 } from "@/lib/storage";
 import type {
   ActionKey,
@@ -101,6 +103,7 @@ function CountDots({ label, active, total, color }: { label: string; active: num
 
 export default function Home() {
   const [game, setGame] = useState<GameState>(() => makeInitialGame());
+  const [undoStack, setUndoStack] = useState<GameState[]>([]);
   const [games, setGames] = useState<GameState[]>([]);
   const [teams, setTeams] = useState<TeamProfile[]>([]);
   const [users, setUsers] = useState<AppUser[]>([]);
@@ -137,6 +140,7 @@ export default function Home() {
     const storedCurrentUserId = window.localStorage.getItem(CURRENT_USER_KEY) || "";
     setGames(storedGames);
     setUsers(storedUsers);
+    setUndoStack(readUndoStack());
     setCurrentUserId(storedUsers.some((user) => user.internalUserId === storedCurrentUserId) ? storedCurrentUserId : "");
     setTeams(readStoredTeams());
     const saved = window.localStorage.getItem(STORAGE_KEY);
@@ -180,6 +184,7 @@ export default function Home() {
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? null;
   const selectedRunner = selectedBase ? game.bases[selectedBase] : null;
   const selectedDefender = selectedPosition ? game.defense[defenseTeam][selectedPosition] : "";
+  const canUndoGame = undoStack.some((snapshot) => snapshot.id === game.id);
   const requiresPosition = useMemo(
     () => new Set<ActionKey>(["groundOut", "flyOut", "error", "sacBunt", "sacFly", "doublePlay"]),
     [],
@@ -266,6 +271,33 @@ export default function Home() {
   function persistUsers(nextUsers: AppUser[]) {
     setUsers(nextUsers);
     window.localStorage.setItem(USER_LIST_KEY, JSON.stringify(nextUsers));
+  }
+
+  function cloneGameState(snapshot: GameState) {
+    return normalizeGame(JSON.parse(JSON.stringify(snapshot)) as Partial<GameState>);
+  }
+
+  function pushUndoSnapshot(snapshot: GameState) {
+    const nextSnapshot = cloneGameState(snapshot);
+    setUndoStack((current) => {
+      const nextStack = [nextSnapshot, ...current].slice(0, 20);
+      writeUndoStack(nextStack);
+      return nextStack;
+    });
+  }
+
+  function restorePreviousGameState() {
+    const snapshotIndex = undoStack.findIndex((snapshot) => snapshot.id === game.id);
+    if (snapshotIndex < 0) return;
+    const snapshot = undoStack[snapshotIndex];
+    const nextStack = undoStack.filter((_, index) => index !== snapshotIndex);
+    setGame(snapshot);
+    setUndoStack(nextStack);
+    writeUndoStack(nextStack);
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+    setViewMode(snapshot.status === "draft" ? "setup" : "score");
+    setSelectedBase(null);
+    setAuthMessage("1つ前の状態に戻しました。");
   }
 
   async function issueAccount() {
@@ -579,14 +611,20 @@ export default function Home() {
   }
 
   function record(action: ActionKey) {
+    if (game.status === "completed") return;
+    pushUndoSnapshot(game);
     setGame((current) => applyPlay(current, action, requiresPosition.has(action) ? selectedPosition : null));
   }
 
   function recordPitch(pitch: PitchKey) {
+    if (game.status === "completed") return;
+    pushUndoSnapshot(game);
     setGame((current) => applyPitch(current, pitch));
   }
 
   function placeCurrentBatterOnFirst() {
+    if (game.status === "completed" || game.bases.first) return;
+    pushUndoSnapshot(game);
     setGame((current) => {
       if (current.status === "completed") return current;
       return {
@@ -605,7 +643,8 @@ export default function Home() {
   }
 
   function operateSelectedRunner(action: RunnerAction) {
-    if (!selectedBase) return;
+    if (!selectedBase || !selectedRunner || game.status === "completed") return;
+    pushUndoSnapshot(game);
 
     setGame((current) => {
       if (current.status === "completed") return current;
@@ -693,6 +732,8 @@ export default function Home() {
   }
 
   function adjustScore(team: TeamKey, amount: number) {
+    if (game.status === "completed") return;
+    pushUndoSnapshot(game);
     setGame((current) => {
       if (current.status === "completed") return current;
       return {
@@ -799,12 +840,16 @@ export default function Home() {
     if (game.id === gameId) {
       const next = makeInitialGame();
       setGame(next);
+      setUndoStack([]);
+      writeUndoStack([]);
       window.localStorage.removeItem(STORAGE_KEY);
       setViewMode("home");
     }
   }
 
   function undoGameEnd() {
+    if (game.status !== "completed") return;
+    pushUndoSnapshot(game);
     setGame((current) => {
       if (current.status !== "completed") return current;
       return {
@@ -813,16 +858,6 @@ export default function Home() {
         endReason: undefined,
         endedAt: undefined,
         history: current.history.filter((entry, index) => !(index === 0 && entry.type === "game")),
-      };
-    });
-  }
-
-  function undoLastHistoryEntry() {
-    setGame((current) => {
-      if (current.history.length === 0 || current.status === "completed") return current;
-      return {
-        ...current,
-        history: current.history.slice(1),
       };
     });
   }
@@ -864,7 +899,8 @@ export default function Home() {
 
   function recordSubstitution() {
     const nextName = subName.trim();
-    if (!selectedPosition || !nextName) return;
+    if (!selectedPosition || !nextName || game.status === "completed") return;
+    pushUndoSnapshot(game);
 
     setGame((current) => {
       if (current.status === "completed") return current;
@@ -901,7 +937,8 @@ export default function Home() {
 
   function recordBattingSubstitution() {
     const nextName = battingSubName.trim();
-    if (!nextName) return;
+    if (!nextName || game.status === "completed") return;
+    pushUndoSnapshot(game);
 
     setGame((current) => {
       if (current.status === "completed") return current;
@@ -929,12 +966,16 @@ export default function Home() {
   }
 
   function resetCount() {
+    if (game.status === "completed") return;
+    pushUndoSnapshot(game);
     setGame((current) => ({ ...current, count: { balls: 0, strikes: 0 } }));
   }
 
   function createNewGame() {
     const next = makeInitialGame();
     setGame(next);
+    setUndoStack([]);
+    writeUndoStack([]);
     setSubName("");
     setBattingSubName("");
     setSelectedPosition("SS");
@@ -943,7 +984,12 @@ export default function Home() {
   }
 
   function openGame(savedGame: GameState) {
-    setGame(normalizeGame(savedGame));
+    const nextGame = normalizeGame(savedGame);
+    setGame(nextGame);
+    if (nextGame.id !== game.id) {
+      setUndoStack([]);
+      writeUndoStack([]);
+    }
     setSubName("");
     setBattingSubName("");
     setSelectedPosition("SS");
@@ -952,6 +998,7 @@ export default function Home() {
   }
 
   function startGame() {
+    pushUndoSnapshot(game);
     setGame((current) => ({
       ...current,
       status: "inProgress",
@@ -962,12 +1009,16 @@ export default function Home() {
   }
 
   function endCurrentGame(reason: EndReason) {
+    if (game.status === "completed") return;
+    pushUndoSnapshot(game);
     setGame((current) => finishGame(current, reason));
   }
 
   function resetGame() {
     const next = makeInitialGame();
     setGame(next);
+    setUndoStack([]);
+    writeUndoStack([]);
     setViewMode("home");
     window.localStorage.removeItem(STORAGE_KEY);
   }
@@ -2033,10 +2084,10 @@ export default function Home() {
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
                   className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
-                  disabled={game.status === "completed" || game.history.length === 0}
-                  onClick={undoLastHistoryEntry}
+                  disabled={!canUndoGame}
+                  onClick={restorePreviousGameState}
                 >
-                  直近履歴だけ削除
+                  1つ戻す
                 </button>
                 <button
                   className="min-h-10 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-black text-amber-800 disabled:bg-slate-100 disabled:text-slate-400"
