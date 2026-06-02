@@ -185,6 +185,10 @@ export default function Home() {
   const selectedRunner = selectedBase ? game.bases[selectedBase] : null;
   const selectedDefender = selectedPosition ? game.defense[defenseTeam][selectedPosition] : "";
   const canUndoGame = undoStack.some((snapshot) => snapshot.id === game.id);
+  const matchingTeamForInput =
+    teamNameInput.trim().length > 0
+      ? teams.find((team) => team.name.trim().toLowerCase() === teamNameInput.trim().toLowerCase())
+      : null;
   const requiresPosition = useMemo(
     () => new Set<ActionKey>(["groundOut", "flyOut", "error", "sacBunt", "sacFly", "doublePlay"]),
     [],
@@ -751,28 +755,25 @@ export default function Home() {
     const players = teamPlayersInput.map((player) => player.trim()).filter(Boolean);
     if (!name) return;
 
-    const nextTeam: TeamProfile = {
-      id: editingTeamId || makeId(),
-      name,
-      players,
-      inviteCode: editingTeamId
-        ? teams.find((team) => team.id === editingTeamId)?.inviteCode || makeInviteCode(teams)
-        : makeInviteCode(teams),
-      ownerUserId: editingTeamId ? teams.find((team) => team.id === editingTeamId)?.ownerUserId : currentUser?.internalUserId,
-      memberUserIds: editingTeamId
-        ? teams.find((team) => team.id === editingTeamId)?.memberUserIds || []
-        : currentUser
-          ? [currentUser.internalUserId]
-          : [],
-      roles: editingTeamId
-        ? teams.find((team) => team.id === editingTeamId)?.roles || {}
-        : currentUser
-          ? { [currentUser.internalUserId]: "admin" }
-          : {},
-    };
-
     setTeams((current) => {
-      const nextTeams = [nextTeam, ...current.filter((team) => team.id !== nextTeam.id && team.name !== name)];
+      const normalizedName = name.toLowerCase();
+      const existingTeam = editingTeamId
+        ? current.find((team) => team.id === editingTeamId)
+        : current.find((team) => team.name.trim().toLowerCase() === normalizedName);
+      const mergedPlayers = Array.from(new Set([...(existingTeam?.players ?? []), ...players]));
+      const nextTeam: TeamProfile = {
+        id: existingTeam?.id || makeId(),
+        name,
+        players: editingTeamId ? players : mergedPlayers,
+        inviteCode: existingTeam?.inviteCode || makeInviteCode(current),
+        ownerUserId: existingTeam?.ownerUserId || currentUser?.internalUserId,
+        memberUserIds: existingTeam?.memberUserIds || (currentUser ? [currentUser.internalUserId] : []),
+        roles: existingTeam?.roles || (currentUser ? { [currentUser.internalUserId]: "admin" } : {}),
+      };
+      const nextTeams = [
+        nextTeam,
+        ...current.filter((team) => team.id !== nextTeam.id && team.name.trim().toLowerCase() !== normalizedName),
+      ];
       window.localStorage.setItem(TEAM_LIST_KEY, JSON.stringify(nextTeams));
       return nextTeams;
     });
@@ -1051,6 +1052,7 @@ export default function Home() {
 
       {viewMode === "home" ? (
         <section className="grid gap-4">
+          {(issuedAccount || !currentUser) && (
           <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
             {issuedAccount ? (
               <div className="grid gap-4">
@@ -1212,6 +1214,7 @@ export default function Home() {
               </>
             )}
           </div>
+          )}
 
           {currentUser && (
             <>
@@ -1309,6 +1312,11 @@ export default function Home() {
                 value={teamNameInput}
                 onChange={(event) => setTeamNameInput(event.target.value)}
               />
+              {matchingTeamForInput && !editingTeamId && (
+                <p className="rounded-md bg-green-50 p-3 text-xs font-black text-green-800">
+                  {matchingTeamForInput.name}は登録済みです。保存すると、このチームにメンバーを追加します。
+                </p>
+              )}
               <div className="grid grid-cols-[1fr_auto] gap-2">
                 <input
                   className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
@@ -1330,6 +1338,28 @@ export default function Home() {
                   追加
                 </button>
               </div>
+              {matchingTeamForInput && matchingTeamForInput.players.length > 0 && (
+                <label className="grid gap-1 text-sm font-bold text-slate-700">
+                  登録済み選手から選ぶ
+                  <select
+                    className="min-h-12 rounded-md border border-slate-300 bg-white px-3 text-base"
+                    defaultValue=""
+                    onChange={(event) => {
+                      const name = event.target.value;
+                      if (!name) return;
+                      setTeamPlayersInput((current) => (current.includes(name) ? current : [...current, name]));
+                      event.target.value = "";
+                    }}
+                  >
+                    <option value="">選手を選択</option>
+                    {matchingTeamForInput.players.map((player) => (
+                      <option key={player} value={player}>
+                        {player}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               {teamPlayersInput.length > 0 && (
                 <div className="rounded-md bg-slate-50 p-3">
                   <p className="mb-2 text-xs font-black text-slate-500">
@@ -1450,6 +1480,22 @@ export default function Home() {
                 ))}
               </div>
             )}
+          </div>
+          <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black text-green-800">ログイン中 / {cloudStatus}</p>
+                <p className="mt-1 text-sm font-black text-slate-950">
+                  {currentUser.displayName} / ID: {currentUser.loginId}
+                </p>
+              </div>
+              <button
+                className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                onClick={logoutAccount}
+              >
+                ログアウト
+              </button>
+            </div>
           </div>
             </>
           )}
@@ -1940,12 +1986,24 @@ export default function Home() {
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
-            {(["away", "home"] as const).map((team) => (
+            {(["away", "home"] as const).map((team) => {
+              const registeredTeamName = team === "away" ? game.awayTeam : game.homeTeam;
+              const registeredTeam = teams.find(
+                (item) => item.name.trim().toLowerCase() === registeredTeamName.trim().toLowerCase(),
+              );
+              return (
               <div key={team} className="grid gap-4">
                 <div>
                   <h3 className="mb-2 text-sm font-black text-slate-800">
                     {team === "away" ? "先攻" : "後攻"}のスタメン
                   </h3>
+                  {registeredTeam && registeredTeam.players.length > 0 && (
+                    <datalist id={`${team}-registered-players`}>
+                      {registeredTeam.players.map((player) => (
+                        <option key={player} value={player} />
+                      ))}
+                    </datalist>
+                  )}
                   <div className="grid gap-2">
                     {(team === "away" ? game.awayLineup : game.homeLineup).map((name, index) => (
                       <label
@@ -1956,6 +2014,7 @@ export default function Home() {
                         <input
                           className="min-h-11 rounded-md border border-slate-300 px-3 text-base font-medium text-slate-900"
                           value={name}
+                          list={registeredTeam ? `${team}-registered-players` : undefined}
                           onChange={(event) => updateLineup(team, index, event.target.value)}
                         />
                         <select
@@ -1992,7 +2051,8 @@ export default function Home() {
                   </label>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
