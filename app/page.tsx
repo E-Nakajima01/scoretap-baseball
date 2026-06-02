@@ -88,12 +88,14 @@ import type {
 
 function CountDots({ label, active, total, color }: { label: string; active: number; total: number; color: string }) {
   return (
-    <div className="flex items-center justify-between gap-2">
-      <span className="w-5 text-sm font-black text-slate-500">{label}</span>
-      <div className="flex gap-1">
+    <div className="flex items-center justify-between gap-3">
+      <span className="w-6 text-base font-black text-slate-950">{label}</span>
+      <div className="flex gap-1.5">
         {Array.from({ length: total }).map((_, index) => (
           <span
-            className={`h-4 w-4 rounded-full border border-slate-300 ${index < active ? color : "bg-slate-100"}`}
+            className={`h-5 w-5 rounded-full border-2 ${
+              index < active ? `${color} border-slate-950` : "border-slate-500 bg-white"
+            }`}
             key={`${label}-${index}`}
           />
         ))}
@@ -2215,90 +2217,90 @@ export default function Home() {
                 <p className="font-black text-slate-950">
                   {game.inning}回{halfLabel(game.half)} / {game.outs}死
                 </p>
-                <p className="truncate text-xs font-bold text-slate-500">打者 {batter}</p>
+                <p className="truncate text-xs font-black text-slate-800">打者 {batter}</p>
               </div>
               <div className="rounded-md bg-slate-950 px-2 py-1 text-center font-black text-white">
                 {game.score.away}-{game.score.home}
               </div>
               <div className="min-w-0 text-right">
                 <p className="font-black text-slate-950">B{game.count.balls} S{game.count.strikes}</p>
-                <p className="truncate text-xs font-bold text-slate-500">
+                <p className="truncate text-xs font-black text-slate-800">
                   {game.bases.first ? "1" : "-"}
                   {game.bases.second ? "2" : "-"}
                   {game.bases.third ? "3" : "-"}
                 </p>
               </div>
             </div>
-            <div className="rounded-lg bg-white p-4 shadow-panel sm:sticky sm:top-3 sm:col-start-1 sm:row-span-6 sm:max-h-[calc(100dvh-1.5rem)] sm:overflow-auto">
+            <div className="rounded-lg border-2 border-slate-200 bg-white p-4 shadow-panel sm:sticky sm:top-3 sm:col-start-1 sm:row-span-6 sm:max-h-[calc(100dvh-1.5rem)] sm:overflow-auto">
               <div className="grid grid-cols-4 gap-2 text-center">
-                <div className="rounded-md bg-slate-100 p-3">
-                  <p className="text-xs font-bold text-slate-500">イニング</p>
+                <div className="rounded-md border border-slate-300 bg-white p-3">
+                  <p className="text-xs font-black text-slate-800">イニング</p>
                   <p className="text-xl font-black text-slate-950">
                     {game.inning}回{halfLabel(game.half)}
                   </p>
                 </div>
-                <div className="rounded-md bg-slate-100 p-3">
-                  <p className="text-xs font-bold text-slate-500">アウト</p>
+                <div className="rounded-md border border-slate-300 bg-white p-3">
+                  <p className="text-xs font-black text-slate-800">アウト</p>
                   <p className="text-2xl font-black text-slate-950">{game.outs}</p>
                 </div>
-                <div className="rounded-md bg-slate-100 p-3">
-                  <p className="text-xs font-bold text-slate-500">カウント</p>
+                <div className="rounded-md border border-slate-300 bg-white p-3">
+                  <p className="text-xs font-black text-slate-800">カウント</p>
                   <p className="text-2xl font-black text-slate-950">{countLabel(game.count)}</p>
                 </div>
-                <div className="rounded-md bg-slate-100 p-3">
-                  <p className="text-xs font-bold text-slate-500">打者</p>
+                <div className="rounded-md border border-slate-300 bg-white p-3">
+                  <p className="text-xs font-black text-slate-800">打者</p>
                   <p className="truncate text-base font-black text-slate-950">{batter}</p>
                 </div>
 	              </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-[0.9fr_1.1fr]">
-                <div className="rounded-lg bg-slate-100 p-4">
-                  <p className="mb-3 text-xs font-black text-slate-500">BSO</p>
+                <div className="rounded-lg border-2 border-slate-300 bg-white p-4">
+                  <p className="mb-3 text-sm font-black text-slate-950">BSO</p>
                   <div className="grid gap-2">
-                    <CountDots label="B" active={game.count.balls} total={3} color="bg-green-500" />
-                    <CountDots label="S" active={game.count.strikes} total={2} color="bg-amber-400" />
-                    <CountDots label="O" active={game.outs} total={2} color="bg-red-500" />
+                    <CountDots label="B" active={game.count.balls} total={3} color="bg-green-700" />
+                    <CountDots label="S" active={game.count.strikes} total={2} color="bg-orange-600" />
+                    <CountDots label="O" active={game.outs} total={2} color="bg-red-700" />
                   </div>
                 </div>
 
-                <div className="rounded-lg bg-slate-100 p-4">
-                  <p className="mb-2 text-xs font-black text-slate-500">塁状況</p>
-                  <div className="relative mx-auto h-32 w-32">
+                <div className="rounded-lg border-2 border-slate-300 bg-white p-4">
+                  <p className="mb-2 text-sm font-black text-slate-950">塁状況</p>
+                  <div className="relative mx-auto h-36 w-36">
                     <button
-                      className={`absolute left-1/2 top-1 h-12 w-12 -translate-x-1/2 rotate-45 rounded-md border-2 ${
-                        game.bases.second ? "border-amber-500 bg-amber-300" : "border-slate-300 bg-white"
-                      } ${selectedBase === "second" ? "ring-4 ring-slate-950/20" : ""}`}
+                      className={`absolute left-1/2 top-1 h-14 w-14 -translate-x-1/2 rotate-45 rounded-md border-4 ${
+                        game.bases.second ? "border-orange-700 bg-orange-300" : "border-slate-600 bg-white"
+                      } ${selectedBase === "second" ? "ring-4 ring-blue-800" : ""}`}
                       onClick={() => setSelectedBase("second")}
                       aria-label="二塁"
                     >
-                      <span className="-rotate-45 block text-[10px] font-black text-slate-800">
+                      <span className="-rotate-45 block text-xs font-black text-slate-950">
                         {game.bases.second ? game.bases.second.name.slice(0, 2) : "2B"}
                       </span>
                     </button>
                     <button
-                      className={`absolute right-1 top-1/2 h-12 w-12 -translate-y-1/2 rotate-45 rounded-md border-2 ${
-                        game.bases.first ? "border-amber-500 bg-amber-300" : "border-slate-300 bg-white"
-                      } ${selectedBase === "first" ? "ring-4 ring-slate-950/20" : ""}`}
+                      className={`absolute right-1 top-1/2 h-14 w-14 -translate-y-1/2 rotate-45 rounded-md border-4 ${
+                        game.bases.first ? "border-orange-700 bg-orange-300" : "border-slate-600 bg-white"
+                      } ${selectedBase === "first" ? "ring-4 ring-blue-800" : ""}`}
                       onClick={() => setSelectedBase("first")}
                       aria-label="一塁"
                     >
-                      <span className="-rotate-45 block text-[10px] font-black text-slate-800">
+                      <span className="-rotate-45 block text-xs font-black text-slate-950">
                         {game.bases.first ? game.bases.first.name.slice(0, 2) : "1B"}
                       </span>
                     </button>
                     <button
-                      className={`absolute left-1 top-1/2 h-12 w-12 -translate-y-1/2 rotate-45 rounded-md border-2 ${
-                        game.bases.third ? "border-amber-500 bg-amber-300" : "border-slate-300 bg-white"
-                      } ${selectedBase === "third" ? "ring-4 ring-slate-950/20" : ""}`}
+                      className={`absolute left-1 top-1/2 h-14 w-14 -translate-y-1/2 rotate-45 rounded-md border-4 ${
+                        game.bases.third ? "border-orange-700 bg-orange-300" : "border-slate-600 bg-white"
+                      } ${selectedBase === "third" ? "ring-4 ring-blue-800" : ""}`}
                       onClick={() => setSelectedBase("third")}
                       aria-label="三塁"
                     >
-                      <span className="-rotate-45 block text-[10px] font-black text-slate-800">
+                      <span className="-rotate-45 block text-xs font-black text-slate-950">
                         {game.bases.third ? game.bases.third.name.slice(0, 2) : "3B"}
                       </span>
                     </button>
-                    <div className="absolute bottom-1 left-1/2 grid h-10 w-10 -translate-x-1/2 rotate-45 place-items-center rounded-md border-2 border-slate-300 bg-white">
-                      <span className="-rotate-45 text-[10px] font-black text-slate-500">H</span>
+                    <div className="absolute bottom-1 left-1/2 grid h-12 w-12 -translate-x-1/2 rotate-45 place-items-center rounded-md border-4 border-slate-600 bg-white">
+                      <span className="-rotate-45 text-xs font-black text-slate-950">H</span>
                     </div>
                   </div>
                 </div>
@@ -2322,15 +2324,16 @@ export default function Home() {
                     key={base}
                     className={`min-h-16 rounded-md border p-2 text-center transition ${
                       selectedBase === base
-                        ? "border-slate-950 bg-slate-950 text-white"
+                        ? "border-blue-900 bg-blue-900 text-white ring-4 ring-blue-900/30"
                         : game.bases[base]
-                          ? "border-amber-400 bg-amber-100 text-slate-950"
-                          : "border-slate-200 bg-slate-50 text-slate-950"
+                          ? "border-orange-700 bg-orange-100 text-slate-950"
+                          : "border-slate-500 bg-white text-slate-950"
                     }`}
                     onClick={() => setSelectedBase(base)}
                   >
-                    <p className={`text-xs font-black ${selectedBase === base ? "text-slate-300" : "text-slate-500"}`}>
+                    <p className={`text-xs font-black ${selectedBase === base ? "text-white" : "text-slate-800"}`}>
                       {baseLabel(base)}
+                      {selectedBase === base ? "・選択中" : ""}
                     </p>
                     <p className="mt-1 truncate text-sm font-black">
                       {game.bases[base]?.name || "空き"}
@@ -2342,7 +2345,7 @@ export default function Home() {
               <p className="mt-3 text-sm font-bold text-green-800">
                 攻撃中: {teamName(game, currentTeam)} / 守備: {teamName(game, defenseTeam)}
               </p>
-              <p className="mt-1 text-xs font-bold text-slate-500">
+              <p className="mt-1 text-xs font-black text-slate-800">
                 {game.settings.scheduledInnings}回制 / {game.settings.dhEnabled ? "DHあり" : "DHなし"} /{" "}
                 {game.settings.mercyEnabled
                   ? `${game.settings.mercyAfterInning}回以降 ${game.settings.mercyRuns}点差コールド`
@@ -2350,14 +2353,14 @@ export default function Home() {
               </p>
               <div className="mt-3 grid grid-cols-2 gap-2">
                 <button
-                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  className="min-h-10 rounded-md border-2 border-blue-700 bg-white px-3 text-sm font-black text-blue-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
                   disabled={!canUndoGame}
                   onClick={restorePreviousGameState}
                 >
                   1つ戻す
                 </button>
                 <button
-                  className="min-h-10 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-black text-amber-800 disabled:bg-slate-100 disabled:text-slate-400"
+                  className="min-h-10 rounded-md border-2 border-orange-700 bg-white px-3 text-sm font-black text-orange-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
                   disabled={game.status !== "completed"}
                   onClick={undoGameEnd}
                 >
@@ -2376,13 +2379,13 @@ export default function Home() {
               ) : (
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <button
-                    className="min-h-11 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                    className="min-h-11 rounded-md bg-red-800 px-3 text-sm font-black text-white shadow-sm"
                     onClick={() => endCurrentGame("manual")}
                   >
                     試合終了
                   </button>
                   <button
-                    className="min-h-11 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-black text-red-700"
+                    className="min-h-11 rounded-md bg-red-800 px-3 text-sm font-black text-white shadow-sm"
                     onClick={() => endCurrentGame("called")}
                   >
                     コールド終了
@@ -2395,7 +2398,7 @@ export default function Home() {
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-black text-slate-950">1球ごとに記録</h2>
                 <button
-                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  className="min-h-10 rounded-md border-2 border-red-800 bg-white px-3 text-sm font-black text-red-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
                   disabled={game.status === "completed"}
                   onClick={resetCount}
                 >
@@ -2406,7 +2409,7 @@ export default function Home() {
                 {(Object.keys(pitchLabels) as PitchKey[]).map((pitch) => (
                   <button
                     key={pitch}
-                    className="min-h-16 rounded-md bg-amber-500 px-3 py-3 text-base font-black text-slate-950 shadow-sm active:scale-[0.99] disabled:bg-slate-200 disabled:text-slate-400"
+                    className="min-h-16 rounded-md bg-orange-700 px-3 py-3 text-base font-black text-white shadow-sm active:scale-[0.99] disabled:bg-slate-300 disabled:text-slate-800"
                     disabled={game.status === "completed"}
                     onClick={() => recordPitch(pitch)}
                   >
@@ -2427,12 +2430,12 @@ export default function Home() {
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-black text-slate-950">ランナー操作</h2>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
+                  <p className="mt-1 rounded-md border-2 border-blue-800 bg-blue-50 px-3 py-2 text-sm font-black text-blue-950">
                     {selectedRunnerLabel}
                   </p>
                 </div>
                 <button
-                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  className="min-h-10 rounded-md border-2 border-blue-700 bg-white px-3 text-sm font-black text-blue-900 disabled:border-slate-500 disabled:bg-slate-200 disabled:text-slate-700"
                   disabled={game.status === "completed" || Boolean(game.bases.first)}
                   onClick={placeCurrentBatterOnFirst}
                 >
@@ -2441,56 +2444,56 @@ export default function Home() {
               </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <button
-                  className="min-h-12 rounded-md bg-amber-500 px-3 text-sm font-black text-slate-950 disabled:bg-slate-200 disabled:text-slate-400"
+                  className="min-h-12 rounded-md bg-blue-800 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("steal")}
                 >
                   盗塁成功
                 </button>
                 <button
-                  className="min-h-12 rounded-md bg-green-700 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  className="min-h-12 rounded-md bg-blue-800 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("advance")}
                 >
                   次の塁へ
                 </button>
                 <button
-                  className="min-h-12 rounded-md border-2 border-slate-950 bg-slate-950 px-3 text-sm font-black text-white disabled:border-slate-300 disabled:bg-slate-300"
+                  className="min-h-12 rounded-md border-2 border-red-900 bg-red-800 px-3 text-sm font-black text-white disabled:border-slate-500 disabled:bg-slate-300 disabled:text-slate-800"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("score")}
                 >
                   ホームへ
                 </button>
                 <button
-                  className="min-h-12 rounded-md bg-blue-600 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  className="min-h-12 rounded-md bg-blue-800 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("wildPitch")}
                 >
                   暴投で進塁
                 </button>
                 <button
-                  className="min-h-12 rounded-md bg-purple-600 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  className="min-h-12 rounded-md bg-blue-800 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("passedBall")}
                 >
                   捕逸で進塁
                 </button>
                 <button
-                  className="min-h-12 rounded-md bg-indigo-700 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                  className="min-h-12 rounded-md bg-blue-900 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
                   disabled={game.status === "completed" || (!game.bases.first && !game.bases.second && !game.bases.third)}
                   onClick={recordBalk}
                 >
                   ボークで全走者進塁
                 </button>
                 <button
-                  className="min-h-12 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-black text-red-700 disabled:bg-slate-100 disabled:text-slate-400"
+                  className="min-h-12 rounded-md bg-red-800 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("caughtStealing")}
                 >
                   盗塁死
                 </button>
                 <button
-                  className="min-h-12 rounded-md border-2 border-red-300 bg-white px-3 text-sm font-black text-red-700 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+                  className="min-h-12 rounded-md bg-red-800 px-3 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
                   disabled={game.status === "completed" || !selectedRunner}
                   onClick={() => operateSelectedRunner("out")}
                 >
@@ -2500,17 +2503,17 @@ export default function Home() {
               <div className="mt-3 grid grid-cols-2 gap-2">
                 {(["away", "home"] as const).map((team) => (
                   <div className="rounded-md bg-slate-50 p-2" key={team}>
-                    <p className="truncate text-xs font-black text-slate-500">{teamName(game, team)}</p>
+                    <p className="truncate text-xs font-black text-slate-800">{teamName(game, team)}</p>
                     <div className="mt-2 grid grid-cols-[1fr_1fr] gap-2">
                       <button
-                        className="min-h-10 rounded-md border border-slate-300 bg-white text-sm font-black text-slate-700 disabled:bg-slate-100"
+                        className="min-h-10 rounded-md border-2 border-slate-500 bg-white text-sm font-black text-slate-900 disabled:bg-slate-200 disabled:text-slate-700"
                         disabled={game.status === "completed"}
                         onClick={() => adjustScore(team, -1)}
                       >
                         -1
                       </button>
                       <button
-                        className="min-h-10 rounded-md bg-slate-950 text-sm font-black text-white disabled:bg-slate-300"
+                        className="min-h-10 rounded-md bg-green-800 text-sm font-black text-white disabled:bg-slate-300 disabled:text-slate-800"
                         disabled={game.status === "completed"}
                         onClick={() => adjustScore(team, 1)}
                       >
@@ -2526,7 +2529,7 @@ export default function Home() {
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-black text-slate-950">インプレーの結果</h2>
-                  <p className="mt-1 text-sm font-bold text-slate-500">
+                  <p className="mt-1 text-sm font-black text-slate-800">
                     まず大分類を選んでから、細かい結果を押します。
                   </p>
                 </div>
@@ -2560,7 +2563,7 @@ export default function Home() {
                       <button
                         key={mode}
                         className={`min-h-12 rounded-md px-3 text-sm font-black ${
-                          playInputMode === mode ? "bg-slate-950 text-white" : "border border-slate-300 bg-white text-slate-700"
+                          playInputMode === mode ? "bg-green-800 text-white ring-4 ring-green-800/25" : "border-2 border-slate-500 bg-white text-slate-900"
                         }`}
                         disabled={game.status === "completed"}
                         onClick={() => setPlayInputMode(mode as typeof playInputMode)}
@@ -2578,7 +2581,7 @@ export default function Home() {
                   </div>
 
                   {playInputMode === "category" && (
-                    <p className="rounded-md bg-slate-50 p-3 text-sm font-bold text-slate-500">
+                    <p className="rounded-md border border-slate-300 bg-white p-3 text-sm font-black text-slate-800">
                       ヒット、アウト、四死球・エラー、犠牲のどれかを選んでください。
                     </p>
                   )}
@@ -2588,7 +2591,7 @@ export default function Home() {
                       {(["single", "double", "triple", "homeRun"] as ActionKey[]).map((action) => (
                         <button
                           key={action}
-                          className="min-h-16 rounded-md bg-green-700 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+                          className="min-h-16 rounded-md bg-green-800 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300 disabled:text-slate-800"
                           disabled={game.status === "completed"}
                           onClick={() => record(action)}
                         >
@@ -2603,7 +2606,7 @@ export default function Home() {
                       {(["groundOut", "flyOut", "strikeout"] as ActionKey[]).map((action) => (
                         <button
                           key={action}
-                          className="min-h-16 rounded-md bg-slate-950 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+                          className="min-h-16 rounded-md bg-slate-950 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300 disabled:text-slate-800"
                           disabled={game.status === "completed"}
                           onClick={() => record(action)}
                         >
@@ -2618,7 +2621,7 @@ export default function Home() {
                       {(["walk", "hitByPitch", "error"] as ActionKey[]).map((action) => (
                         <button
                           key={action}
-                          className="min-h-16 rounded-md bg-amber-500 px-3 py-3 text-base font-black text-slate-950 shadow-sm disabled:bg-slate-300"
+                          className="min-h-16 rounded-md bg-orange-700 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300 disabled:text-slate-800"
                           disabled={game.status === "completed"}
                           onClick={() => record(action)}
                         >
@@ -2633,7 +2636,7 @@ export default function Home() {
                       {(["sacBunt", "sacFly"] as ActionKey[]).map((action) => (
                         <button
                           key={action}
-                          className="min-h-16 rounded-md bg-blue-700 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+                          className="min-h-16 rounded-md bg-blue-800 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300 disabled:text-slate-800"
                           disabled={game.status === "completed"}
                           onClick={() => record(action)}
                         >
@@ -2651,8 +2654,8 @@ export default function Home() {
             <div className="rounded-lg bg-white p-4 shadow-panel">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-lg font-black text-slate-950">守備位置をタップ</h2>
-                <p className="rounded-md bg-green-100 px-3 py-1 text-sm font-black text-green-900">
-                  {selectedPosition ? `${selectedPosition}: ${selectedDefender}` : "未選択"}
+                <p className="rounded-md border-2 border-blue-800 bg-blue-50 px-3 py-1 text-sm font-black text-blue-950">
+                  {selectedPosition ? `選択中 ${selectedPosition}: ${selectedDefender}` : "未選択"}
                 </p>
               </div>
               <div className="relative mx-auto aspect-square max-w-md overflow-hidden rounded-lg bg-field-grass">
@@ -2664,8 +2667,8 @@ export default function Home() {
                     key={position.key}
                     className={`absolute ${position.className} grid h-14 w-14 place-items-center rounded-md border-2 px-1 text-center text-xs font-black shadow-sm transition ${
                       selectedPosition === position.key
-                        ? "border-white bg-slate-950 text-white"
-                        : "border-white/80 bg-white text-slate-950"
+                        ? "border-blue-900 bg-blue-900 text-white ring-4 ring-blue-900/30"
+                        : "border-white bg-white text-slate-950"
                     }`}
                     onClick={() => setSelectedPosition(position.key)}
                     aria-label={positionLabels[position.key]}
@@ -2691,7 +2694,7 @@ export default function Home() {
                   <button
                     key={mode}
                     className={`min-h-11 rounded-md px-3 text-sm font-black ${
-                      substitutionMode === mode ? "bg-slate-950 text-white" : "border border-slate-300 bg-white text-slate-700"
+                      substitutionMode === mode ? "bg-blue-900 text-white ring-4 ring-blue-900/25" : "border-2 border-slate-500 bg-white text-slate-900"
                     }`}
                     onClick={() => setSubstitutionMode(mode as typeof substitutionMode)}
                   >

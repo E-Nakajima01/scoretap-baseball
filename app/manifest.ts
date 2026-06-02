@@ -7,7 +7,7 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "1球ごとに記録できる初心者向け野球スコアブック",
     start_url: "/",
     scope: "/",
-    display: "standalone",
+    display: "fullscreen",
     background_color: "#FBFAF6",
     theme_color: "#2F7D47",
     orientation: "landscape",

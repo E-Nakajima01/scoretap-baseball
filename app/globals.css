@@ -43,6 +43,11 @@ button {
   touch-action: manipulation;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
 @media (orientation: landscape) {
   .score-landscape-hint {
     display: none;
