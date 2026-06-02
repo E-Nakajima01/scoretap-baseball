@@ -114,6 +114,7 @@ export default function Home() {
   const [selectedPosition, setSelectedPosition] = useState<PositionKey | null>("SS");
   const [selectedBase, setSelectedBase] = useState<BaseKey | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("home");
+  const [playInputMode, setPlayInputMode] = useState<"closed" | "category" | "hit" | "out" | "reach" | "sacrifice">("closed");
   const [substitutionMode, setSubstitutionMode] = useState<"defense" | "pitcher" | "pinchHitter" | "pinchRunner">("defense");
   const [subName, setSubName] = useState("");
   const [battingSubName, setBattingSubName] = useState("");
@@ -671,6 +672,7 @@ export default function Home() {
     if (game.status === "completed") return;
     pushUndoSnapshot(game);
     setGame((current) => applyPlay(current, action, requiresPosition.has(action) ? selectedPosition : null));
+    setPlayInputMode("closed");
   }
 
   function recordPitch(pitch: PitchKey) {
@@ -2365,6 +2367,13 @@ export default function Home() {
                   </button>
                 ))}
               </div>
+              <button
+                className="mt-3 min-h-14 w-full rounded-md bg-green-700 px-4 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+                disabled={game.status === "completed"}
+                onClick={() => setPlayInputMode((current) => (current === "closed" ? "category" : "closed"))}
+              >
+                インプレー・打席結果を入力
+              </button>
             </div>
 
             <div className="rounded-lg bg-white p-4 shadow-panel md:col-start-2">
@@ -2460,21 +2469,127 @@ export default function Home() {
             </div>
 
             <div className="rounded-lg bg-white p-4 shadow-panel md:col-start-2">
-              <h2 className="mb-3 text-lg font-black text-slate-950">打席結果を記録</h2>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {(Object.keys(actionLabels) as ActionKey[])
-                  .filter((action) => action !== "strikeout")
-                  .map((action) => (
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-slate-950">インプレーの結果</h2>
+                  <p className="mt-1 text-sm font-bold text-slate-500">
+                    まず大分類を選んでから、細かい結果を押します。
+                  </p>
+                </div>
+                {playInputMode !== "closed" && (
                   <button
-                    key={action}
-                    className="min-h-16 rounded-md bg-green-700 px-3 py-3 text-base font-black text-white shadow-sm active:scale-[0.99] disabled:bg-slate-300"
-                    disabled={game.status === "completed"}
-                    onClick={() => record(action)}
+                    className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                    onClick={() => setPlayInputMode("closed")}
                   >
-                    {actionLabels[action]}
+                    閉じる
                   </button>
-                ))}
+                )}
               </div>
+
+              {playInputMode === "closed" ? (
+                <button
+                  className="min-h-14 w-full rounded-md bg-green-700 px-4 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+                  disabled={game.status === "completed"}
+                  onClick={() => setPlayInputMode("category")}
+                >
+                  結果を選ぶ
+                </button>
+              ) : (
+                <div className="grid gap-3">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {[
+                      ["hit", "ヒット"],
+                      ["out", "アウト"],
+                      ["reach", "四死球・エラー"],
+                      ["sacrifice", "犠牲"],
+                    ].map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        className={`min-h-12 rounded-md px-3 text-sm font-black ${
+                          playInputMode === mode ? "bg-slate-950 text-white" : "border border-slate-300 bg-white text-slate-700"
+                        }`}
+                        disabled={game.status === "completed"}
+                        onClick={() => setPlayInputMode(mode as typeof playInputMode)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <button
+                      className="min-h-12 rounded-md bg-red-700 px-3 text-sm font-black text-white disabled:bg-slate-300"
+                      disabled={game.status === "completed"}
+                      onClick={() => record("doublePlay")}
+                    >
+                      併殺
+                    </button>
+                  </div>
+
+                  {playInputMode === "category" && (
+                    <p className="rounded-md bg-slate-50 p-3 text-sm font-bold text-slate-500">
+                      ヒット、アウト、四死球・エラー、犠牲のどれかを選んでください。
+                    </p>
+                  )}
+
+                  {playInputMode === "hit" && (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {(["single", "double", "triple", "homeRun"] as ActionKey[]).map((action) => (
+                        <button
+                          key={action}
+                          className="min-h-16 rounded-md bg-green-700 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+                          disabled={game.status === "completed"}
+                          onClick={() => record(action)}
+                        >
+                          {actionLabels[action]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {playInputMode === "out" && (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {(["groundOut", "flyOut", "strikeout"] as ActionKey[]).map((action) => (
+                        <button
+                          key={action}
+                          className="min-h-16 rounded-md bg-slate-950 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+                          disabled={game.status === "completed"}
+                          onClick={() => record(action)}
+                        >
+                          {actionLabels[action]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {playInputMode === "reach" && (
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {(["walk", "hitByPitch", "error"] as ActionKey[]).map((action) => (
+                        <button
+                          key={action}
+                          className="min-h-16 rounded-md bg-amber-500 px-3 py-3 text-base font-black text-slate-950 shadow-sm disabled:bg-slate-300"
+                          disabled={game.status === "completed"}
+                          onClick={() => record(action)}
+                        >
+                          {actionLabels[action]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {playInputMode === "sacrifice" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["sacBunt", "sacFly"] as ActionKey[]).map((action) => (
+                        <button
+                          key={action}
+                          className="min-h-16 rounded-md bg-blue-700 px-3 py-3 text-base font-black text-white shadow-sm disabled:bg-slate-300"
+                          disabled={game.status === "completed"}
+                          onClick={() => record(action)}
+                        >
+                          {actionLabels[action]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </section>
 
