@@ -1010,11 +1010,14 @@ export default function Home() {
 
   function endCurrentGame(reason: EndReason) {
     if (game.status === "completed") return;
+    const message = reason === "called" ? "コールド終了にしますか？" : "試合終了にしますか？";
+    if (!window.confirm(message)) return;
     pushUndoSnapshot(game);
     setGame((current) => finishGame(current, reason));
   }
 
   function resetGame() {
+    if (!window.confirm("入力中の試合をリセットしますか？")) return;
     const next = makeInitialGame();
     setGame(next);
     setUndoStack([]);
@@ -1962,6 +1965,25 @@ export default function Home() {
       ) : (
         <div className="grid gap-4 lg:grid-cols-[1fr_0.92fr]">
           <section className="grid gap-4">
+            <div className="sticky top-0 z-30 -mx-4 grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-slate-200 bg-white/95 px-4 py-2 text-sm shadow-sm backdrop-blur sm:hidden">
+              <div className="min-w-0">
+                <p className="font-black text-slate-950">
+                  {game.inning}回{halfLabel(game.half)} / {game.outs}死
+                </p>
+                <p className="truncate text-xs font-bold text-slate-500">打者 {batter}</p>
+              </div>
+              <div className="rounded-md bg-slate-950 px-2 py-1 text-center font-black text-white">
+                {game.score.away}-{game.score.home}
+              </div>
+              <div className="min-w-0 text-right">
+                <p className="font-black text-slate-950">B{game.count.balls} S{game.count.strikes}</p>
+                <p className="truncate text-xs font-bold text-slate-500">
+                  {game.bases.first ? "1" : "-"}
+                  {game.bases.second ? "2" : "-"}
+                  {game.bases.third ? "3" : "-"}
+                </p>
+              </div>
+            </div>
             <div className="rounded-lg bg-white p-4 shadow-panel">
               <div className="grid grid-cols-4 gap-2 text-center">
                 <div className="rounded-md bg-slate-100 p-3">
