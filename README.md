@@ -81,6 +81,27 @@ npm run verify
 
 現時点のユーザー、チーム、試合データは `localStorage` に保存されます。スマホを変えたりブラウザのデータを消したりすると消えるため、実運用でチーム共有する前にSupabaseなどのクラウドDBへ移行するのが次の大きなステップです。
 
+## Supabaseでクラウド保存する
+
+1. Supabaseで新しいProjectを作成します。
+2. Project Settings → API で以下をコピーします。
+   - Project URL
+   - anon public key
+3. SQL Editorで [supabase/schema.sql](./supabase/schema.sql) のSQLを実行します。
+4. Authentication → Providers → Email で、メール確認をOFFにします。
+   ScoreTapは画面上メールを使わず、内部的に `loginId@scoretap.local` の合成メールでSupabase Authを使います。
+5. ローカルでは `.env.local` を作り、以下を設定します。
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=あなたのProject URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY=あなたのanon public key
+```
+
+6. Vercelでも Project Settings → Environment Variables に同じ2つを追加します。
+7. Vercelで再デプロイします。
+
+Supabase環境変数がない場合は、今まで通り `localStorage` 保存で動きます。環境変数がある場合は、ログイン後にチーム、試合一覧、現在の試合を `scoretap_cloud_state` に同期します。
+
 ## 使い方
 
 1. ホーム画面の「ログイン」で、発行済みのIDとパスワードを入力します。

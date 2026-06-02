@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { getSupabaseClient } from "@/lib/supabase";
 
 type Half = "top" | "bottom";
 type TeamKey = "away" | "home";
@@ -329,6 +330,10 @@ function makeRecoveryCode() {
 
 function hashPassword(value: string) {
   return btoa(unescape(encodeURIComponent(`scoretap:${value}`)));
+}
+
+function loginIdToCloudEmail(loginId: string) {
+  return `${loginId.trim().toLowerCase()}@scoretap.local`;
 }
 
 function normalizeGame(saved: Partial<GameState>): GameState {
@@ -1140,7 +1145,9 @@ export default function Home() {
   const [displayNameInput, setDisplayNameInput] = useState("");
   const [inviteCodeInput, setInviteCodeInput] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  const [cloudStatus, setCloudStatus] = useState("ローカル保存");
   const [issuedAccount, setIssuedAccount] = useState<{ loginId: string; password: string; recoveryCode: string } | null>(null);
+  const currentUser = users.find((user) => user.internalUserId === currentUserId) ?? null;
 
   useEffect(() => {
     const storedGames = readStoredGames();
@@ -1161,6 +1168,8 @@ export default function Home() {
       }
     }
     setReady(true);
+    void restoreCloudSession();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1173,12 +1182,19 @@ export default function Home() {
         return nextGames;
       });
     }
+    void saveCloudState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game, ready]);
+
+  useEffect(() => {
+    if (!ready || !currentUser) return;
+    void saveCloudState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teams, games, currentUserId, ready]);
 
   const currentTeam = battingTeam(game);
   const defenseTeam = fieldingTeam(game);
   const batter = currentBatter(game);
-  const currentUser = users.find((user) => user.internalUserId === currentUserId) ?? null;
   const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? null;
   const selectedRunner = selectedBase ? game.bases[selectedBase] : null;
   const selectedDefender = selectedPosition ? game.defense[defenseTeam][selectedPosition] : "";
@@ -1187,19 +1203,144 @@ export default function Home() {
     [],
   );
 
+  async function restoreCloudSession() {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setCloudStatus("ローカル保存");
+      return;
+    }
+
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user.id;
+    if (!userId) {
+      setCloudStatus("クラウド未ログイン");
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from("scoretap_profiles")
+      .select("id, login_id, display_name, recovery_code, created_at")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (!profile) {
+      setCloudStatus("クラウドプロフィール未設定");
+      return;
+    }
+
+    const cloudUser: AppUser = {
+      internalUserId: profile.id,
+      loginId: profile.login_id,
+      displayName: profile.display_name,
+      passwordHash: "",
+      recoveryCode: profile.recovery_code,
+      createdAt: profile.created_at,
+    };
+    const nextUsers = [cloudUser, ...readStoredUsers().filter((user) => user.internalUserId !== cloudUser.internalUserId)];
+    persistUsers(nextUsers);
+    setCurrentUserId(cloudUser.internalUserId);
+    window.localStorage.setItem(CURRENT_USER_KEY, cloudUser.internalUserId);
+
+    const { data: cloudState } = await supabase
+      .from("scoretap_cloud_state")
+      .select("teams, games, current_game")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (cloudState) {
+      const nextTeams = Array.isArray(cloudState.teams) ? (cloudState.teams as TeamProfile[]) : [];
+      const nextGames = Array.isArray(cloudState.games) ? (cloudState.games as GameState[]).map(normalizeGame) : [];
+      setTeams(nextTeams);
+      setGames(nextGames);
+      window.localStorage.setItem(TEAM_LIST_KEY, JSON.stringify(nextTeams));
+      window.localStorage.setItem(GAME_LIST_KEY, JSON.stringify(nextGames));
+      if (cloudState.current_game) {
+        const nextGame = normalizeGame(cloudState.current_game as Partial<GameState>);
+        setGame(nextGame);
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextGame));
+      }
+    }
+
+    setCloudStatus("クラウド同期中");
+  }
+
+  async function saveCloudState() {
+    const supabase = getSupabaseClient();
+    if (!supabase || !currentUser) return;
+    const { data: sessionData } = await supabase.auth.getSession();
+    const userId = sessionData.session?.user.id;
+    if (!userId) return;
+
+    const { error } = await supabase.from("scoretap_cloud_state").upsert({
+      user_id: userId,
+      teams,
+      games,
+      current_game: game,
+    });
+
+    setCloudStatus(error ? "クラウド保存エラー" : "クラウド同期中");
+  }
+
   function persistUsers(nextUsers: AppUser[]) {
     setUsers(nextUsers);
     window.localStorage.setItem(USER_LIST_KEY, JSON.stringify(nextUsers));
   }
 
-  function issueAccount() {
+  async function issueAccount() {
     const password = makeShortCode(8).toLowerCase();
+    const loginId = makeLoginId(users);
+    const recoveryCode = makeRecoveryCode();
+    const supabase = getSupabaseClient();
+    let internalUserId = makeId();
+
+    if (supabase) {
+      setCloudStatus("クラウド登録中");
+      const { data, error } = await supabase.auth.signUp({
+        email: loginIdToCloudEmail(loginId),
+        password,
+        options: {
+          data: {
+            login_id: loginId,
+            display_name: "ScoreTapユーザー",
+          },
+        },
+      });
+
+      if (error || !data.user) {
+        setAuthMessage(error?.message || "クラウド登録に失敗しました。");
+        setCloudStatus("クラウド登録エラー");
+        return;
+      }
+
+      internalUserId = data.user.id;
+
+      const { error: profileError } = await supabase.from("scoretap_profiles").upsert({
+        id: internalUserId,
+        login_id: loginId,
+        display_name: "ScoreTapユーザー",
+        recovery_code: recoveryCode,
+      });
+
+      if (profileError) {
+        setAuthMessage("プロフィール保存に失敗しました。Supabase Authのメール確認をOFFにしているか確認してください。");
+        setCloudStatus("クラウド登録エラー");
+        return;
+      }
+
+      await supabase.from("scoretap_cloud_state").upsert({
+        user_id: internalUserId,
+        teams,
+        games,
+        current_game: game,
+      });
+    }
+
     const nextUser: AppUser = {
-      internalUserId: makeId(),
-      loginId: makeLoginId(users),
+      internalUserId,
+      loginId,
       displayName: "ScoreTapユーザー",
-      passwordHash: hashPassword(password),
-      recoveryCode: makeRecoveryCode(),
+      passwordHash: supabase ? "" : hashPassword(password),
+      recoveryCode,
       createdAt: nowString(),
     };
     const nextUsers = [nextUser, ...users];
@@ -1207,12 +1348,33 @@ export default function Home() {
     setCurrentUserId(nextUser.internalUserId);
     window.localStorage.setItem(CURRENT_USER_KEY, nextUser.internalUserId);
     setIssuedAccount({ loginId: nextUser.loginId, password, recoveryCode: nextUser.recoveryCode });
+    setCloudStatus(supabase ? "クラウド同期中" : "ローカル保存");
     setAuthMessage("");
   }
 
-  function loginAccount() {
+  async function loginAccount() {
     const loginId = loginIdInput.trim();
     const password = loginPasswordInput.trim();
+    const supabase = getSupabaseClient();
+
+    if (supabase) {
+      setCloudStatus("クラウドログイン中");
+      const { error } = await supabase.auth.signInWithPassword({
+        email: loginIdToCloudEmail(loginId),
+        password,
+      });
+      if (error) {
+        setAuthMessage("IDまたはパスワードが違います。");
+        setCloudStatus("クラウドログインエラー");
+        return;
+      }
+      await restoreCloudSession();
+      setLoginIdInput("");
+      setLoginPasswordInput("");
+      setAuthMessage("クラウドにログインしました。");
+      return;
+    }
+
     const user = users.find((item) => item.loginId === loginId && item.passwordHash === hashPassword(password));
     if (!user) {
       setAuthMessage("IDまたはパスワードが違います。");
@@ -1225,14 +1387,17 @@ export default function Home() {
     setAuthMessage(`${user.displayName}でログインしました。`);
   }
 
-  function logoutAccount() {
+  async function logoutAccount() {
+    const supabase = getSupabaseClient();
+    if (supabase) await supabase.auth.signOut();
     setCurrentUserId("");
     window.localStorage.removeItem(CURRENT_USER_KEY);
     setIssuedAccount(null);
+    setCloudStatus(supabase ? "クラウド未ログイン" : "ローカル保存");
     setAuthMessage("ログアウトしました。");
   }
 
-  function changeLoginId() {
+  async function changeLoginId() {
     if (!currentUser) return;
     const nextLoginId = newLoginIdInput.trim();
     if (nextLoginId.length < 4) {
@@ -1243,6 +1408,24 @@ export default function Home() {
       setAuthMessage("そのIDはすでに使われています。");
       return;
     }
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { error: authError } = await supabase.auth.updateUser({ email: loginIdToCloudEmail(nextLoginId) });
+      if (authError) {
+        setAuthMessage(authError.message);
+        return;
+      }
+      const { error: profileError } = await supabase
+        .from("scoretap_profiles")
+        .update({ login_id: nextLoginId })
+        .eq("id", currentUser.internalUserId);
+      if (profileError) {
+        setAuthMessage(profileError.message);
+        return;
+      }
+    }
+
     const nextUsers = users.map((user) =>
       user.internalUserId === currentUser.internalUserId ? { ...user, loginId: nextLoginId } : user,
     );
@@ -1251,13 +1434,34 @@ export default function Home() {
     setAuthMessage(`ログインIDを${nextLoginId}に変更しました。`);
   }
 
-  function updateAccountSettings() {
+  async function updateAccountSettings() {
     if (!currentUser) return;
     const nextDisplayName = displayNameInput.trim() || currentUser.displayName;
     const nextPassword = newPasswordInput.trim();
     if (nextPassword && nextPassword.length < 4) {
       setAuthMessage("新しいパスワードは4文字以上で設定してください。");
       return;
+    }
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const updatePayload: { password?: string; data: { display_name: string } } = {
+        data: { display_name: nextDisplayName },
+      };
+      if (nextPassword) updatePayload.password = nextPassword;
+      const { error: authError } = await supabase.auth.updateUser(updatePayload);
+      if (authError) {
+        setAuthMessage(authError.message);
+        return;
+      }
+      const { error: profileError } = await supabase
+        .from("scoretap_profiles")
+        .update({ display_name: nextDisplayName })
+        .eq("id", currentUser.internalUserId);
+      if (profileError) {
+        setAuthMessage(profileError.message);
+        return;
+      }
     }
 
     const nextUsers = users.map((user) =>
@@ -1854,6 +2058,7 @@ export default function Home() {
                     ? "ID、表示名、パスワードはここで変更できます。"
                     : "発行済みのIDとパスワードでログインします。"}
                 </p>
+                <p className="mt-1 text-xs font-black text-green-800">保存状態: {cloudStatus}</p>
               </div>
               {currentUser && (
                 <button
