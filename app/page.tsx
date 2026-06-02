@@ -1291,16 +1291,21 @@ export default function Home() {
           </div>
 
           <div className="rounded-lg bg-white p-4 shadow-panel sm:p-6">
-            <h2 className="mb-3 text-lg font-black text-slate-950">チーム・メンバー登録</h2>
+            <div className="mb-3">
+              <h2 className="text-lg font-black text-slate-950">チーム・メンバー登録</h2>
+              <p className="mt-1 text-sm font-bold text-slate-500">
+                チームごとにメンバーを保存します。巨人と阪神のように、別チームは別カードで管理されます。
+              </p>
+            </div>
             {editingTeamId && (
               <p className="mb-3 rounded-md bg-amber-50 p-3 text-sm font-bold text-amber-800">
-                チームを編集中です。保存すると上書きされます。
+                {teamNameInput || "選択中のチーム"}を編集中です。保存するとこのチームだけ上書きされます。
               </p>
             )}
             <div className="grid gap-3">
               <input
                 className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
-                placeholder="チーム名"
+                placeholder="チーム名 例: 巨人"
                 value={teamNameInput}
                 onChange={(event) => setTeamNameInput(event.target.value)}
               />
@@ -1326,7 +1331,11 @@ export default function Home() {
                 </button>
               </div>
               {teamPlayersInput.length > 0 && (
-                <div className="flex flex-wrap gap-2 rounded-md bg-slate-50 p-3">
+                <div className="rounded-md bg-slate-50 p-3">
+                  <p className="mb-2 text-xs font-black text-slate-500">
+                    {teamNameInput.trim() || "このチーム"}に登録する選手
+                  </p>
+                  <div className="flex flex-wrap gap-2">
                   {teamPlayersInput.map((player) => (
                     <button
                       key={player}
@@ -1336,6 +1345,7 @@ export default function Home() {
                       {player} ×
                     </button>
                   ))}
+                  </div>
                 </div>
               )}
               <div className="flex flex-col gap-2 sm:flex-row">
@@ -1362,25 +1372,67 @@ export default function Home() {
               </div>
             </div>
             {teams.length > 0 && (
-              <div className="mt-3 grid gap-2">
+              <div className="mt-5 grid gap-3">
                 {teams.map((team) => (
                   <div
                     key={team.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-slate-50 p-3"
+                    className="grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3"
                   >
-                    <div>
-                      <p className="text-sm font-black text-slate-950">{team.name}</p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                      <p className="text-base font-black text-slate-950">{team.name}</p>
                       <p className="text-xs font-bold text-slate-500">
                         {team.players.length}人登録 / 招待コード {team.inviteCode}
                       </p>
+                      </div>
+                      <div className="relative flex gap-2">
+                        <button
+                          className="min-h-10 rounded-md bg-slate-950 px-3 text-xs font-black text-white"
+                          onClick={() => openTeamDetail(team.id)}
+                        >
+                          詳細
+                        </button>
+                        <button
+                          className="grid h-10 w-10 place-items-center rounded-md border border-slate-300 bg-white text-lg font-black text-slate-700"
+                          onClick={() => setOpenTeamMenuId((current) => (current === team.id ? "" : team.id))}
+                          aria-label="チーム操作"
+                        >
+                          ⋯
+                        </button>
+                        {openTeamMenuId === team.id && (
+                          <div className="absolute right-0 top-11 z-10 grid min-w-32 gap-1 rounded-md border border-slate-200 bg-white p-1 shadow-panel">
+                            <button
+                              className="rounded-md px-3 py-2 text-left text-sm font-black text-slate-700 hover:bg-slate-50"
+                              onClick={() => editTeamProfile(team)}
+                            >
+                              編集
+                            </button>
+                            <button
+                              className="rounded-md px-3 py-2 text-left text-sm font-black text-red-700 hover:bg-red-50"
+                              onClick={() => deleteTeamProfile(team.id)}
+                            >
+                              削除
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <div className="relative flex gap-2">
-                      <button
-                        className="min-h-10 rounded-md bg-slate-950 px-3 text-xs font-black text-white"
-                        onClick={() => openTeamDetail(team.id)}
-                      >
-                        詳細
-                      </button>
+                    <div className="flex flex-wrap gap-1">
+                      {team.players.slice(0, 8).map((player) => (
+                        <span key={player} className="rounded-md bg-white px-2 py-1 text-xs font-black text-slate-700">
+                          {player}
+                        </span>
+                      ))}
+                      {team.players.length > 8 && (
+                        <span className="rounded-md bg-white px-2 py-1 text-xs font-black text-slate-500">
+                          +{team.players.length - 8}
+                        </span>
+                      )}
+                      {team.players.length === 0 && (
+                        <span className="text-xs font-bold text-slate-500">まだ選手が登録されていません。</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
                       <button
                         className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-xs font-black text-slate-700"
                         onClick={() => applyTeamProfile("away", team.id)}
@@ -1393,29 +1445,6 @@ export default function Home() {
                       >
                         後攻に使う
                       </button>
-                      <button
-                        className="grid h-10 w-10 place-items-center rounded-md border border-slate-300 bg-white text-lg font-black text-slate-700"
-                        onClick={() => setOpenTeamMenuId((current) => (current === team.id ? "" : team.id))}
-                        aria-label="チーム操作"
-                      >
-                        ⋯
-                      </button>
-                      {openTeamMenuId === team.id && (
-                        <div className="absolute right-0 top-11 z-10 grid min-w-32 gap-1 rounded-md border border-slate-200 bg-white p-1 shadow-panel">
-                          <button
-                            className="rounded-md px-3 py-2 text-left text-sm font-black text-slate-700 hover:bg-slate-50"
-                            onClick={() => editTeamProfile(team)}
-                          >
-                            編集
-                          </button>
-                          <button
-                            className="rounded-md px-3 py-2 text-left text-sm font-black text-red-700 hover:bg-red-50"
-                            onClick={() => deleteTeamProfile(team.id)}
-                          >
-                            削除
-                          </button>
-                        </div>
-                      )}
                     </div>
                   </div>
                 ))}
@@ -1823,6 +1852,26 @@ export default function Home() {
               </label>
             </div>
           )}
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {(["away", "home"] as const).map((side) => {
+              const lineup = side === "away" ? game.awayLineup : game.homeLineup;
+              const name = side === "away" ? game.awayTeam : game.homeTeam;
+              return (
+                <div key={side} className="rounded-md bg-slate-50 p-3">
+                  <p className="text-xs font-black text-slate-500">{side === "away" ? "先攻" : "後攻"}</p>
+                  <p className="mt-1 text-sm font-black text-slate-950">{name || "チーム未設定"}</p>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {lineup.slice(0, 9).map((player, index) => (
+                      <span key={`${side}-${index}-${player}`} className="rounded-md bg-white px-2 py-1 text-xs font-black text-slate-700">
+                        {index + 1}. {player}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
 
           <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4">
             <h3 className="mb-3 text-sm font-black text-slate-800">試合設定</h3>
