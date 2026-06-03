@@ -131,6 +131,7 @@ export default function Home() {
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedPlayerName, setSelectedPlayerName] = useState("");
   const [selectedPlateAppearanceId, setSelectedPlateAppearanceId] = useState("");
+  const [openAccountSettings, setOpenAccountSettings] = useState(false);
   const [loginIdInput, setLoginIdInput] = useState("");
   const [loginPasswordInput, setLoginPasswordInput] = useState("");
   const [newLoginIdInput, setNewLoginIdInput] = useState("");
@@ -468,6 +469,7 @@ export default function Home() {
     resetUserDataView();
     setViewMode("home");
     setIssuedAccount(null);
+    setOpenAccountSettings(false);
     setCloudStatus(supabase ? "クラウド未ログイン" : "ローカル保存");
     setAuthMessage("ログアウトしました。");
   }
@@ -1624,13 +1626,83 @@ export default function Home() {
                   {currentUser.displayName} / ID: {currentUser.loginId}
                 </p>
               </div>
-              <button
-                className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
-                onClick={logoutAccount}
-              >
-                ログアウト
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="min-h-10 rounded-md bg-slate-950 px-3 text-sm font-black text-white"
+                  onClick={() => setOpenAccountSettings((current) => !current)}
+                >
+                  アカウント設定
+                </button>
+                <button
+                  className="min-h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-black text-slate-700"
+                  onClick={logoutAccount}
+                >
+                  ログアウト
+                </button>
+              </div>
             </div>
+            {openAccountSettings && (
+              <div className="mt-4 grid gap-3 border-t border-slate-200 pt-4">
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                    placeholder="新しいログインID"
+                    value={newLoginIdInput}
+                    onChange={(event) => setNewLoginIdInput(event.target.value)}
+                  />
+                  <button
+                    className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                    disabled={!newLoginIdInput.trim()}
+                    onClick={changeLoginId}
+                  >
+                    ID変更
+                  </button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                    placeholder="表示名"
+                    value={displayNameInput}
+                    onChange={(event) => setDisplayNameInput(event.target.value)}
+                  />
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base"
+                    placeholder="新しいパスワード"
+                    type="password"
+                    value={newPasswordInput}
+                    onChange={(event) => setNewPasswordInput(event.target.value)}
+                  />
+                </div>
+                <button
+                  className="min-h-12 rounded-md bg-slate-950 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                  disabled={!displayNameInput.trim() && !newPasswordInput.trim()}
+                  onClick={updateAccountSettings}
+                >
+                  表示名・パスワードを保存
+                </button>
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input
+                    className="min-h-12 rounded-md border border-slate-300 px-3 text-base uppercase"
+                    placeholder="チーム招待コード"
+                    value={inviteCodeInput}
+                    onChange={(event) => setInviteCodeInput(event.target.value)}
+                  />
+                  <button
+                    className="min-h-12 rounded-md bg-green-700 px-4 text-sm font-black text-white disabled:bg-slate-300"
+                    disabled={!inviteCodeInput.trim()}
+                    onClick={joinTeamByInviteCode}
+                  >
+                    参加
+                  </button>
+                </div>
+                <p className="text-xs font-bold leading-5 text-slate-600">
+                  IDは次回ログインから使います。パスワードを変えたら、忘れないように控えてください。
+                </p>
+              </div>
+            )}
+            {authMessage && (
+              <p className="mt-3 rounded-md bg-amber-50 p-3 text-sm font-bold text-amber-800">{authMessage}</p>
+            )}
           </div>
             </>
           )}
